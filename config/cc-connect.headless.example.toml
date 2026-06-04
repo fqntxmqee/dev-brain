@@ -1,0 +1,39 @@
+# cc-connect headless 配置示例（Phase 2+）
+# 三个 Worker project 去掉 platforms，由 dev-brain 经 api.sock 调用
+
+language = "zh"
+
+[log]
+level = "info"
+
+[[projects]]
+name = "workspace-claude"
+
+[projects.agent]
+type = "claudecode"
+
+[projects.agent.options]
+work_dir = "/Users/fukai/workspace"
+mode = "default"
+
+[[projects]]
+name = "workspace-codex"
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/Users/fukai/workspace"
+mode = "suggest"
+
+[[projects]]
+name = "workspace-cursor"
+
+[projects.agent]
+type = "cursor"
+
+[projects.agent.options]
+work_dir = "/Users/fukai/workspace"
+mode = "default"
+
+# Brain Bot 由 dev-brain 独立管理，不在 cc-connect 内配置
