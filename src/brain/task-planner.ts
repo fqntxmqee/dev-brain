@@ -34,12 +34,15 @@ function pickRuntime(description: string, index: number): AgentRuntime {
     return "cursor";
   }
   if (containsAny(description, CODE_KEYWORDS)) {
-    return index % 2 === 0 ? "codex" : "codex";
+    return index % 2 === 0 ? "codex" : "cursor";
   }
   if (index === 0) return "claude-code";
   if (index === 1) return "codex";
   return "cursor";
 }
+
+/** @internal 测试导出 */
+export const pickRuntimeForTest = pickRuntime;
 
 /** 从需求描述推断可能冲突的文件范围 */
 export function inferFileScope(description: string): string {
