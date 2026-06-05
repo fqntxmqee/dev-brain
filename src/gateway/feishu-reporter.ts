@@ -1,4 +1,4 @@
-import type { FeishuInboundMessage } from "../core/types.js";
+import type { FeishuInboundMessage, InboundMessage } from "../core/types.js";
 import { MAX_REPLY_TEXT_BYTES } from "../core/constants.js";
 import type { FeishuInteractiveCard } from "./feishu-cards.js";
 
@@ -14,9 +14,16 @@ export interface FeishuCardReply {
   readonly replyToMessageId?: string;
 }
 
+export interface FeishuCardUpdate {
+  readonly messageId: string;
+  readonly card: FeishuInteractiveCard;
+}
+
 export interface FeishuReporter {
   sendText(reply: FeishuReply): Promise<void>;
   sendCard?(reply: FeishuCardReply): Promise<void>;
+  /** 进度卡片 update 而非 send（CAP-GW-04 / T-52） */
+  updateCard?(update: FeishuCardUpdate): Promise<string | undefined>;
 }
 
 /** 飞书单条 text 长度上限（CAP-CLI 16KB / T-43） */
@@ -44,6 +51,9 @@ export function assertReplyTextWithinLimit(
 export class InMemoryFeishuReporter implements FeishuReporter {
   readonly sent: FeishuReply[] = [];
   readonly cards: FeishuCardReply[] = [];
+  readonly updates: FeishuCardUpdate[] = [];
+  /** 模拟 messageId 累加器：第 N 次 sendCard 返回 om-1/2/3... */
+  private cardSeq = 0;
 
   async sendText(reply: FeishuReply): Promise<void> {
     this.sent.push(reply);
@@ -51,6 +61,12 @@ export class InMemoryFeishuReporter implements FeishuReporter {
 
   async sendCard(reply: FeishuCardReply): Promise<void> {
     this.cards.push(reply);
+    this.cardSeq += 1;
+  }
+
+  async updateCard(update: FeishuCardUpdate): Promise<string | undefined> {
+    this.updates.push(update);
+    return update.messageId;
   }
 }
 
@@ -102,10 +118,26 @@ export class LarkCliFeishuReporter implements FeishuReporter {
       JSON.stringify(reply.card),
     ]);
   }
+
+  async updateCard(update: FeishuCardUpdate): Promise<string | undefined> {
+    // 飞书 update_card 端点（lark-cli 包装）。
+    await spawnLarkCli([
+      "im",
+      "+messages-update",
+      "--message-id",
+      update.messageId,
+      "--content",
+      JSON.stringify(update.card),
+    ]);
+    return update.messageId;
+  }
 }
 
-export function formatInboundLog(message: FeishuInboundMessage): string {
-  return `[feishu] ${message.senderName}@${message.chatId}: ${message.text.slice(0, 80)}`;
+export function formatInboundLog(
+  message: FeishuInboundMessage | InboundMessage,
+): string {
+  const sender = message.senderName ?? message.senderOpenId;
+  return `[feishu] ${sender}@${message.chatId}: ${message.text.slice(0, 80)}`;
 }
 
 export function supportsCards(
