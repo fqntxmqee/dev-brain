@@ -1,44 +1,78 @@
 import { v4 as uuid } from "uuid";
 import type { AgentRuntime, LockMode, PlannedSubTask } from "../core/types.js";
+import { MAX_DESC_LEN, MAX_SUBTASK_TITLE_LEN } from "../core/constants.js";
 
-const EXPLORE_KEYWORDS = [
-  "探索",
-  "分析",
-  "架构",
-  "审查",
-  "review",
-  "explore",
-  "architect",
-];
-const CODE_KEYWORDS = [
-  "实现",
-  "编码",
-  "修改",
-  "开发",
-  "implement",
-  "code",
-  "refactor",
-];
-const DEBUG_KEYWORDS = ["调试", "联调", "debug", "fix bug", "cursor"];
+type KeywordMatcher = ReadonlyArray<string>;
 
-function containsAny(text: string, keywords: ReadonlyArray<string>): boolean {
+/**
+ * 关键词 → runtime 映射（CAP-ADPT-09 / T-39）。
+ * 集中维护，新增 runtime 只需：1) 加 AgentRuntime 字面量；2) 加一条匹配规则。
+ */
+const RUNTIME_KEYWORDS: ReadonlyArray<{
+  runtime: AgentRuntime;
+  keywords: KeywordMatcher;
+}> = [
+  {
+    runtime: "claude-code",
+    keywords: [
+      "探索",
+      "分析",
+      "架构",
+      "审查",
+      "review",
+      "explore",
+      "architect",
+    ],
+  },
+  { runtime: "cursor", keywords: ["调试", "联调", "debug", "fix bug"] },
+  { runtime: "codex", keywords: [] },
+];
+
+function containsAny(text: string, keywords: KeywordMatcher): boolean {
+  if (keywords.length === 0) return false;
   const lower = text.toLowerCase();
   return keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
+function matchByKeyword(description: string): AgentRuntime | undefined {
+  for (const entry of RUNTIME_KEYWORDS) {
+    if (containsAny(description, entry.keywords)) {
+      return entry.runtime;
+    }
+  }
+  return undefined;
+}
+
+const FALLBACK_CYCLE: ReadonlyArray<AgentRuntime> = [
+  "claude-code",
+  "codex",
+  "cursor",
+];
+
+function fallbackRuntime(index: number): AgentRuntime {
+  const i =
+    ((index % FALLBACK_CYCLE.length) + FALLBACK_CYCLE.length) %
+    FALLBACK_CYCLE.length;
+  return FALLBACK_CYCLE[i] ?? "claude-code";
+}
+
 function pickRuntime(description: string, index: number): AgentRuntime {
-  if (containsAny(description, EXPLORE_KEYWORDS)) {
-    return "claude-code";
-  }
-  if (containsAny(description, DEBUG_KEYWORDS)) {
-    return "cursor";
-  }
-  if (containsAny(description, CODE_KEYWORDS)) {
+  const matched = matchByKeyword(description);
+  if (matched) return matched;
+  if (
+    containsAny(description, [
+      "实现",
+      "编码",
+      "修改",
+      "开发",
+      "implement",
+      "code",
+      "refactor",
+    ])
+  ) {
     return index % 2 === 0 ? "codex" : "cursor";
   }
-  if (index === 0) return "claude-code";
-  if (index === 1) return "codex";
-  return "cursor";
+  return fallbackRuntime(index);
 }
 
 /** @internal 测试导出 */
@@ -159,12 +193,12 @@ export function formatPlanSummary(
     const files = st.requiredFiles.length
       ? ` 🔒${st.requiredFiles.join(",")}`
       : "";
-    return `${i + 1}. [${st.runtime}] ${st.description.slice(0, 100)}${deps}${files}`;
+    return `${i + 1}. [${st.runtime}] ${st.description.slice(0, MAX_SUBTASK_TITLE_LEN)}${deps}${files}`;
   });
   return [
     `📋 任务计划`,
     ``,
-    `需求：${description.slice(0, 200)}`,
+    `需求：${description.slice(0, MAX_DESC_LEN)}`,
     ``,
     `子任务（${subTasks.length}，同层可并行）：`,
     ...lines,

@@ -1,19 +1,19 @@
-import type { DevBrainConfig } from '../config/env.js';
-import type { AgentRuntime } from '../core/types.js';
-import { CcConnectClient } from './cc-connect-client.js';
-import { ClaudeCodeAdapter, CodexAdapter } from './claude-code-adapter.js';
-import { CursorAdapter } from './cursor-adapter.js';
-import type { AgentAdapter } from './types.js';
+import type { DevBrainConfig } from "../config/env.js";
+import type { AgentRuntime } from "../core/types.js";
+import { CcConnectClient } from "./cc-connect-client.js";
+import { ClaudeCodeAdapter, CodexAdapter } from "./claude-code-adapter.js";
+import { CursorAdapter } from "./cursor-adapter.js";
+import type { AgentAdapter } from "./types.js";
 
 export class AdapterRegistry {
   private readonly adapters: ReadonlyMap<AgentRuntime, AgentAdapter>;
 
-  constructor(config: DevBrainConfig) {
-    const client = CcConnectClient.fromConfig(config);
+  constructor(config: DevBrainConfig, client?: CcConnectClient) {
+    const resolved = client ?? CcConnectClient.fromConfig(config);
     const entries: ReadonlyArray<[AgentRuntime, AgentAdapter]> = [
-      ['claude-code', new ClaudeCodeAdapter(config, client)],
-      ['codex', new CodexAdapter(config, client)],
-      ['cursor', new CursorAdapter(config, client)],
+      ["claude-code", new ClaudeCodeAdapter(config, resolved)],
+      ["codex", new CodexAdapter(config, resolved)],
+      ["cursor", new CursorAdapter(config, resolved)],
     ];
     this.adapters = new Map(entries);
   }

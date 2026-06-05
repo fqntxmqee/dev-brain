@@ -9,6 +9,11 @@ import type {
   PlannedSubTask,
   SubTaskProgress,
 } from "../core/types.js";
+import {
+  MAX_DESC_LEN,
+  MAX_OUTPUT_LEN,
+  SHORT_ID_LEN,
+} from "../core/constants.js";
 import { FileLockManager, LockConflictError } from "../governance/index.js";
 import type { FileLock } from "../governance/types.js";
 import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
@@ -322,13 +327,14 @@ function formatExecutionSummary(
     (st) => st.status === "blocked",
   );
   const lines = outputs.map(
-    (o) => `${o.subTaskId} [${o.runtime}]: ${o.output.slice(0, 200)}`,
+    (o) =>
+      `${o.subTaskId} [${o.runtime}]: ${o.output.slice(0, MAX_OUTPUT_LEN)}`,
   );
   const header = blocked.length > 0 ? "⚠️ 任务部分完成" : "✅ 任务完成";
   return [
-    `${header} #${plan.taskId.slice(0, 8)}`,
+    `${header} #${plan.taskId.slice(0, SHORT_ID_LEN)}`,
     ``,
-    `需求：${plan.description.slice(0, 160)}`,
+    `需求：${plan.description.slice(0, MAX_DESC_LEN)}`,
     ...(blocked.length
       ? [
           "",
