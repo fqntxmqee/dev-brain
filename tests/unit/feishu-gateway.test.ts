@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDevBrainApp } from "../../src/bootstrap.js";
 import { InMemoryFeishuReporter } from "../../src/gateway/feishu-reporter.js";
 import type { FeishuCardAction } from "../../src/core/types.js";
+import { getMetrics } from "../../src/observability/metrics.js";
 
 const ALLOW_KEY = "DEV_BRAIN_ALLOW_FROM";
 
@@ -258,5 +259,82 @@ describe("FeishuGateway handleCardAction (T-51 / CAP-GW-04)", () => {
     };
     await app.gateway.handleCardAction(action);
     expect(app.brain.getStatus().completedTasks).toBe(1);
+  });
+});
+
+describe("FeishuGateway observability (v0.7.0)", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = setAllow("ou_test");
+  });
+  afterEach(() => {
+    restore();
+  });
+
+  it("increments_gateway_messages_received_counter", async () => {
+    const metrics = getMetrics();
+    const before = metrics.get("gateway.messages.received");
+    const reporter = new InMemoryFeishuReporter();
+    const app = createDevBrainApp(reporter);
+    await app.gateway.handleMessage({
+      messageId: "m-obs-1",
+      chatId: "c-obs",
+      senderOpenId: "ou_test",
+      senderName: "t",
+      text: "/status",
+    });
+    const after = metrics.get("gateway.messages.received");
+    expect(after).toBe(before + 1);
+  });
+
+  it("records_gateway_message_duration_histogram", async () => {
+    const metrics = getMetrics();
+    const before = metrics
+      .histogram("gateway.message.duration_seconds")
+      .count();
+    const reporter = new InMemoryFeishuReporter();
+    const app = createDevBrainApp(reporter);
+    await app.gateway.handleMessage({
+      messageId: "m-obs-2",
+      chatId: "c-obs",
+      senderOpenId: "ou_test",
+      senderName: "t",
+      text: "/help",
+    });
+    const after = metrics.histogram("gateway.message.duration_seconds").count();
+    expect(after).toBeGreaterThanOrEqual(before + 1);
+  });
+
+  it("increments_oversize_rejection_counter", async () => {
+    const metrics = getMetrics();
+    const before = metrics.get("gateway.messages.rejected_oversize");
+    const reporter = new InMemoryFeishuReporter();
+    const app = createDevBrainApp(reporter);
+    await app.gateway.handleMessage({
+      messageId: "m-obs-3",
+      chatId: "c-obs",
+      senderOpenId: "ou_test",
+      senderName: "t",
+      text: "a".repeat(5000),
+    });
+    const after = metrics.get("gateway.messages.rejected_oversize");
+    expect(after).toBe(before + 1);
+  });
+
+  it("increments_gateway_card_action_counter", async () => {
+    const metrics = getMetrics();
+    const before = metrics.get("gateway.card.action");
+    const reporter = new InMemoryFeishuReporter();
+    const app = createDevBrainApp(reporter);
+    const action: FeishuCardAction = {
+      action: "approve",
+      taskId: "no-task",
+      chatId: "c-obs",
+      operatorOpenId: "ou_test",
+      operatorName: "tester",
+    };
+    await app.gateway.handleCardAction(action);
+    const after = metrics.get("gateway.card.action");
+    expect(after).toBe(before + 1);
   });
 });
