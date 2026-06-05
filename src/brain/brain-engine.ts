@@ -418,9 +418,20 @@ export class BrainEngine {
         { id: st.id, runtime: st.runtime, status: "pending" },
       ]),
     );
+    // T-64 fix: 注册 retry 上下文到 orchestrator，避免 updateSubTaskStatus 抛
+    // "Task not found"。每次重试创建独立 record，便于事后追溯。
+    const retryTask = this.deps.orchestrator.createTask(
+      `retry:${plan.taskId}`,
+      `retry-${Date.now()}`,
+    );
+    this.deps.orchestrator.planTask(
+      retryTask.id,
+      plan.subTasks.map((st) => ({ id: st.id, description: st.description })),
+    );
+    this.deps.orchestrator.beginExecution(retryTask.id);
     const out = await this.executeSubTask(
       plan,
-      `retry-${Date.now()}`,
+      retryTask.id,
       subTask,
       progressState,
       async () => undefined,
