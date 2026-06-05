@@ -120,6 +120,7 @@ pnpm cli -- start                                # 启动飞书 Gateway
 | **4** ✅ | 卡片按钮审批 + Bridge 异步回复 + headless --apply |
 | **v0.8.0** ✅ | Native claude + codex (`agentBackend=native`,直接 spawn `claude` / `codex-minimax`) |
 | **v0.8.1** ✅ | Native cursor (`spawn cursor-agent -p ...`),cc-connect 不再是 cursor 派发路径 |
+| **v0.9.0** ✅ | 卡片交互闭环(原地 update + 错误态卡片)+ 发送链路稳健化(16KB 分片 + 28KB 降级 + 401/429 重试) |
 
 ## OpenSpec
 

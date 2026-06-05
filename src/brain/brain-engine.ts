@@ -58,6 +58,8 @@ export class BrainEngine {
       subTasks: ReadonlyArray<SubTaskProgress>;
     }
   >();
+  /** v0.9.0: 计划卡片 messageId 追踪 — Gateway 用此原地 update 进度/汇总卡片 */
+  private readonly planMessageIds = new Map<string, string>();
   /** T-61: 同一 chat 重复创建 plan 的覆盖次数 */
   private overwriteCount = 0;
   private readonly fileLocks: FileLockManager;
@@ -129,10 +131,26 @@ export class BrainEngine {
     return this.pendingByChat.get(chatId);
   }
 
+  /** v0.9.0: 记录计划卡片 messageId,Gateway 后续用此原地 update 卡片 */
+  setPlanMessageId(taskId: string, messageId: string): void {
+    this.planMessageIds.set(taskId, messageId);
+  }
+
+  /** v0.9.0: 读取计划卡片 messageId,undefined 表示未记录或已清理 */
+  getPlanMessageId(taskId: string): string | undefined {
+    return this.planMessageIds.get(taskId);
+  }
+
+  /** v0.9.0: 清理 taskId 对应的 messageId(approve/cancel 完成时调用) */
+  clearPlanMessageId(taskId: string): void {
+    this.planMessageIds.delete(taskId);
+  }
+
   cancelPlan(chatId: string): boolean {
     const plan = this.pendingByChat.get(chatId);
     if (!plan) return false;
     this.pendingByChat.delete(chatId);
+    this.planMessageIds.delete(plan.taskId);
     safe(
       () =>
         this.metrics.gauge("brain.pending_plans").set(this.pendingByChat.size),
@@ -155,6 +173,8 @@ export class BrainEngine {
     }
 
     this.pendingByChat.delete(chatId);
+    // v0.9.0: 计划已批准 → 清理 messageId 追踪(后续 progress/summary 用此 id 原地 update)
+    this.planMessageIds.delete(plan.taskId);
     this.activeCount += 1;
     safe(
       () =>

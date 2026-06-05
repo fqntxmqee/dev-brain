@@ -11,6 +11,7 @@ import type {
   FeishuInboundMessage,
 } from "../core/types.js";
 import {
+  buildErrorCard,
   buildPlanCard,
   buildProgressCard,
   buildSummaryCard,
@@ -83,20 +84,26 @@ export class FeishuGateway {
       return;
     }
 
+    const planMessageId = this.deps.brain.getPlanMessageId(pending.taskId);
     const result = await this.deps.brain.approveAndExecute(
       action.chatId,
       async (progress) => {
         if (!this.useCards) return;
-        await this.sendCard(action.chatId, buildProgressCard(progress));
+        await this.sendCard(
+          action.chatId,
+          buildProgressCard(progress),
+          undefined,
+          planMessageId,
+        );
       },
       action.taskId,
     );
 
     if (this.useCards) {
-      await this.sendCard(
-        action.chatId,
-        buildSummaryCard(result, pending.description),
-      );
+      const card = result.success
+        ? buildSummaryCard(result, pending.description)
+        : buildErrorCard(result, pending.description);
+      await this.sendCard(action.chatId, card, undefined, planMessageId);
     }
     await this.sendTextToChat(action.chatId, result.summary);
   }
@@ -170,6 +177,9 @@ export class FeishuGateway {
         case "approve": {
           const pending = this.deps.brain.getPendingPlan(message.chatId);
           const description = pending?.description ?? "";
+          const planMessageId = pending
+            ? this.deps.brain.getPlanMessageId(pending.taskId)
+            : undefined;
 
           const result = await this.deps.brain.approveAndExecute(
             message.chatId,
@@ -179,16 +189,21 @@ export class FeishuGateway {
                 message.chatId,
                 buildProgressCard(progress),
                 message.messageId,
+                planMessageId,
               );
             },
           );
 
           replyText = result.summary;
           if (this.useCards) {
+            const card = result.success
+              ? buildSummaryCard(result, description)
+              : buildErrorCard(result, description);
             await this.sendCard(
               message.chatId,
-              buildSummaryCard(result, description),
+              card,
               message.messageId,
+              planMessageId,
             );
           }
           break;
@@ -204,11 +219,14 @@ export class FeishuGateway {
       }
 
       if (planForCard && this.useCards) {
-        await this.sendCard(
+        const newId = await this.sendCard(
           message.chatId,
           buildPlanCard(planForCard, { withActions: this.useCardActions }),
           message.messageId,
         );
+        if (newId) {
+          this.deps.brain.setPlanMessageId(planForCard.taskId, newId);
+        }
       }
 
       await this.sendText(message, replyText);
@@ -241,9 +259,20 @@ export class FeishuGateway {
     chatId: string,
     card: ReturnType<typeof buildPlanCard>,
     replyToMessageId?: string,
-  ): Promise<void> {
-    if (!supportsCards(this.deps.reporter)) return;
-    await this.deps.reporter.sendCard({ chatId, card, replyToMessageId });
+    planMessageId?: string,
+  ): Promise<string | undefined> {
+    if (!supportsCards(this.deps.reporter)) return undefined;
+    // v0.9.0 (CAP-GW-04): 优先原地 update 已有计划卡片
+    if (planMessageId && this.deps.reporter.updateCard) {
+      await this.deps.reporter.updateCard({ messageId: planMessageId, card });
+      return planMessageId;
+    }
+    const newId = await this.deps.reporter.sendCard?.({
+      chatId,
+      card,
+      replyToMessageId,
+    });
+    return newId;
   }
 }
 

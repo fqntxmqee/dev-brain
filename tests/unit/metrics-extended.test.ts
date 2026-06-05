@@ -190,10 +190,12 @@ describe("MetricsRegistry — getMetricsText output format (v0.7.0)", () => {
     const r = new MetricsRegistry();
     r.registerAll();
     const text = r.getMetricsText();
-    // 24 counters + 9 gauges + 4 histograms = 37 metric families
+    // v0.9.0: 30 counters + 9 gauges + 4 histograms = 43 metric families
+    // (was 24 counters; v0.9.0 added 6: auth_expired / rate_limited /
+    //  retry_succeeded / text.chunked / text.chunk_count_total / card.degraded)
     // Each family has 1 # HELP + 1 # TYPE + ≥1 value lines
     const helpLines = text.split("\n").filter((l) => l.startsWith("# HELP "));
-    expect(helpLines.length).toBe(24 + 9 + 4);
+    expect(helpLines.length).toBe(30 + 9 + 4);
   });
 });
 

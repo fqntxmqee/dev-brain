@@ -52,6 +52,16 @@ const COUNTER_HELP: Readonly<Record<string, string>> = {
   "gateway.messages.deduped": "Total duplicate messages suppressed",
   "gateway.messages.rejected_oversize": "Total messages rejected for >4KB",
   "gateway.card.action": "Total card actions received (approve/cancel)",
+  // v0.9.0: feishu 错误分类 + 重试 + 分片 + 卡片降级
+  "gateway.feishu.auth_expired":
+    "401/Auth errors (AUTH_EXPIRED classification)",
+  "gateway.feishu.rate_limited":
+    "429/Rate-limit errors (RATE_LIMIT classification)",
+  "gateway.feishu.retry_succeeded": "Transient retries that succeeded",
+  "gateway.text.chunked": "Long text replies split into multiple messages",
+  "gateway.text.chunk_count_total":
+    "Total chunk count for split messages (sum)",
+  "gateway.card.degraded": "Cards degraded to fit within 28KB",
   "file.lock.acquired.read": "Total read locks acquired",
   "file.lock.acquired.write": "Total write locks acquired",
   "file.lock.conflicts": "Total LockConflictError thrown",

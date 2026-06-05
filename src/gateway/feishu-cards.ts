@@ -189,6 +189,65 @@ export function buildSummaryCard(
   };
 }
 
+/**
+ * v0.9.0: 任务失败时专用错误卡片（CAP-GW-05）。
+ * 与 buildSummaryCard 不同:聚焦错误摘要 + 失败子任务列表,便于用户快速定位。
+ */
+export function buildErrorCard(
+  result: BrainTaskResult,
+  description: string,
+): FeishuInteractiveCard {
+  const failedLines = result.subTaskOutputs
+    .filter(
+      (o) =>
+        o.output.startsWith("❌") ||
+        o.output.startsWith("⛔") ||
+        o.output.startsWith("blocked"),
+    )
+    .map(
+      (o) =>
+        `- **${o.subTaskId}** [${o.runtime}]: ${o.output.slice(0, MAX_SUBTASK_TITLE_LEN)}`,
+    );
+  const fallback =
+    failedLines.length > 0
+      ? failedLines.join("\n")
+      : result.summary.slice(0, MAX_DESC_LEN);
+
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: "plain_text", content: "❌ 任务失败" },
+      template: "red",
+    },
+    elements: [
+      {
+        tag: "div",
+        text: {
+          tag: "lark_md",
+          content: `**#${result.taskId.slice(0, SHORT_ID_LEN)}**\n${description.slice(0, MAX_OUTPUT_LEN)}`,
+        },
+      },
+      { tag: "hr" },
+      {
+        tag: "div",
+        text: {
+          tag: "lark_md",
+          content: `**失败子任务（${failedLines.length}）**\n${fallback}`,
+        },
+      },
+      {
+        tag: "note",
+        elements: [
+          {
+            tag: "plain_text",
+            content: "回复 /list 查看历史,或 /retry <taskId> 重试。",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 export function serializeCard(card: FeishuInteractiveCard): string {
   return JSON.stringify(card);
 }

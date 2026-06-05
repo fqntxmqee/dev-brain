@@ -281,6 +281,25 @@ pgrep -f "lark-cli event" | xargs kill -9
 
 lark-cli 输出格式变了,parser 没匹配上。完整事件会被打印,可能需要更新 `src/gateway/feishu-events.ts` 的 schema。
 
+#### 卡片点"批准执行"无反应
+
+v0.9.0 升级后,审批按钮走 `card.action.trigger` 事件。检查:
+
+1. 飞书应用 → 事件订阅 → 勾选 `card.action.trigger_v1`(v0.8 文档已要求,确认实际勾上)
+2. 飞书应用 → 权限管理 → `im:message:send_as_bot` 已开
+3. daemon 日志看 `gateway: card action received` — 有收到说明事件已注册,无说明事件未注册
+
+#### 长输出被截断 / 飞书端看不到完整结果
+
+v0.9.0 升级后,`/status` / 任务汇总文本超 16KB 时自动分片发送;卡片超 28KB 时三档降级。
+- 看 `/metrics`:`gateway.text.chunked` / `gateway.card.degraded` 计数
+- `gateway.card.degraded` 持续 > 0:说明输出过大,需拆分子任务或精简 prompt
+
+#### 飞书 API 401 / 429 错误
+
+- `gateway.feishu.auth_expired > 0`:tenant token 过期。重启 daemon 重新拉 token。
+- `gateway.feishu.rate_limited > 0/min`:被限流,退避重试 3 次后仍失败;考虑给 lark-cli 加 `--profile` 切换或降低发送频率。
+
 ### 7.4 手动调试 send
 
 ```bash
