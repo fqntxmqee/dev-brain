@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { toErrorMessage, toErrorName } from "../../src/core/error-utils.js";
+import {
+  toErrorMessage,
+  toErrorName,
+  isModuleNotFound,
+} from "../../src/core/error-utils.js";
 import {
   AdapterError,
   AuthError,
@@ -55,5 +59,33 @@ describe("toErrorMessage", () => {
     const e = new CustomErr();
     expect(toErrorMessage(e)).toBe("custom");
     expect(e.retryable).toBe(true);
+  });
+});
+
+describe("isModuleNotFound", () => {
+  it("matches_ERR_MODULE_NOT_FOUND_code", () => {
+    const e = new Error("Cannot find module 'foo'") as Error & {
+      code?: string;
+    };
+    e.code = "ERR_MODULE_NOT_FOUND";
+    expect(isModuleNotFound(e, "foo")).toBe(true);
+  });
+
+  it("matches_Cannot_find_package_string", () => {
+    expect(
+      isModuleNotFound("Cannot find package '@cursor/sdk'", "@cursor/sdk"),
+    ).toBe(true);
+  });
+
+  it("rejects_unrelated_error", () => {
+    expect(isModuleNotFound(new Error("network down"))).toBe(false);
+  });
+
+  it("filters_by_module_name", () => {
+    const e = new Error("Cannot find module 'foo'") as Error & {
+      code?: string;
+    };
+    e.code = "ERR_MODULE_NOT_FOUND";
+    expect(isModuleNotFound(e, "bar")).toBe(false);
   });
 });
