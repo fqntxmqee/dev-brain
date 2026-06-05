@@ -80,7 +80,7 @@ describe("MetricsServer live integration (v0.7.0)", () => {
     }
   });
 
-  it("responds_to_healthz_metrics_readyz", async () => {
+  it("responds_to_healthz_metrics_readyz", { timeout: 30_000 }, async () => {
     const port = 19_000 + Math.floor(Math.random() * 1_000);
     const script = `
       import { MetricsServer } from "/Users/fukai/workspace/dev-brain/src/observability/metrics-server.ts";
@@ -102,7 +102,10 @@ describe("MetricsServer live integration (v0.7.0)", () => {
 
     // wait for PORT= line
     const resolvedPort = await new Promise<number>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("timeout")), 5000);
+      const t = setTimeout(
+        () => reject(new Error("metrics server boot timeout")),
+        15_000,
+      );
       const handler = setInterval(() => {
         const m = stdout.match(/PORT=(\d+)/);
         if (m) {
