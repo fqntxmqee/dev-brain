@@ -1,7 +1,7 @@
 ---
 demand-id: DM-20260605-002
 change: production-hardening
-status: developing
+status: archived
 ---
 
 # Observability Spec (Delta)
