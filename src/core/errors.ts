@@ -1,3 +1,5 @@
+import { redactMessage } from "./redact.js";
+
 /**
  * 集中式错误类型。便于：
  * 1. 上游 instanceof 精确分支（不同 UI 文案 / 不同重试策略）
@@ -15,7 +17,7 @@ export abstract class DevBrainError extends Error {
   protected constructor(message: string, opts: { retryable?: boolean } = {}) {
     super(message);
     this.name = this.constructor.name;
-    this.safeMessage = message;
+    this.safeMessage = redactMessage(message);
     this.retryable = opts.retryable ?? false;
   }
 }
