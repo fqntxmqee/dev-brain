@@ -4,9 +4,9 @@ groups:
     rules:
       - alert: BrainHighFailureRate
         expr: |
-          sum(rate(brain_tasks_failed_total[5m]))
+          sum(rate(brain_tasks_failed[5m]))
             /
-          (sum(rate(brain_tasks_completed_total[5m])) + 0.001)
+          (sum(rate(brain_tasks_completed[5m])) + 0.001)
             > 0.25
         for: 10m
         labels:
@@ -45,7 +45,7 @@ groups:
             See RUNBOOK §4 CcConnectSocketDown.
 
       - alert: FileLockContention
-        expr: sum(rate(file_lock_conflicts_total[5m])) > 0.5
+        expr: sum(rate(file_lock_conflicts[5m])) > 0.5
         for: 10m
         labels:
           severity: warn

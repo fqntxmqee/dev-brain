@@ -38,11 +38,11 @@ journalctl -u dev-brain -o cat | jq 'select(.task_id == "def-456")'
 
 All metric names below are emitted by `getMetricsText()` at `http://host:9090/metrics`.
 
-- Counters (rate-able): `brain_tasks_completed_total`, `brain_tasks_failed_total`,
-  `file_lock_conflicts_total`, `adapter_sent`, `adapter_failed`, `adapter_cancelled`,
-  `gateway_messages_received`, `gateway_messages_rejected_oversize`, `gateway_card_action`,
-  `bridge_http_fallback`, `http_metrics_requests_total`, `http_healthz_requests_total`,
-  `http_readyz_requests_total`, `http_404_requests`.
+- Counters (rate-able): `brain.tasks.completed`, `brain.tasks.failed`,
+  `file.lock.conflicts`, `adapter.sent`, `adapter.failed`, `adapter.cancelled`,
+  `gateway.messages.received`, `gateway.messages.rejected_oversize`, `gateway.card.action`,
+  `bridge.http.fallback`, `http.metrics.requests`, `http.healthz.requests`,
+  `http.readyz.requests`, `http.404.requests`.
 - Gauges: `brain_pending_plans`, `brain_active_tasks`, `brain_active_subtasks`,
   `file_lock_held`, `cc_socket_reachable`, `process_heap_bytes`, `process_rss_bytes`,
   `process_eventloop_lag_seconds`, `process_uptime_seconds`.
@@ -53,7 +53,7 @@ All metric names below are emitted by `getMetricsText()` at `http://host:9090/me
 
 ## §2 BrainHighFailureRate (page)
 
-**Expression:** `rate(brain_tasks_failed_total[5m]) / rate(brain_tasks_completed_total[5m]) > 0.25`
+**Expression:** `rate(brain_tasks_failed[5m]) / rate(brain_tasks_completed[5m]) > 0.25`
 **For:** 10m
 
 ### Symptom
@@ -62,7 +62,7 @@ failure ratio in the Brain Tasks panel of the Grafana dashboard.
 
 ### Diagnosis
 1. `curl http://localhost:9090/metrics | grep brain_tasks` — confirm
-   `brain_tasks_failed_total` is climbing.
+   `brain.tasks.failed` is climbing.
 2. `dev-brain list` — look at recent failures and their summaries.
 3. For each failed task, `dev-brain show <taskId> --subtask <id>` to see
    the full error from the adapter.
@@ -155,7 +155,7 @@ check `~/.cc-connect/config.toml` for syntax errors.
 
 ## §5 FileLockContention (warn)
 
-**Expression:** `rate(file_lock_conflicts_total[5m]) > 0.5`
+**Expression:** `rate(file_lock_conflicts[5m]) > 0.5`
 **For:** 10m
 
 ### Symptom

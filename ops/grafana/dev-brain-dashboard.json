@@ -34,7 +34,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(brain_tasks_completed_total[5m]))",
+          "expr": "sum(rate(brain_tasks_completed[5m]))",
           "legendFormat": "completed/s",
           "refId": "A"
         }
@@ -68,7 +68,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(brain_tasks_failed_total[5m])) / (sum(rate(brain_tasks_completed_total[5m])) + 0.001)",
+          "expr": "sum(rate(brain_tasks_failed[5m])) / (sum(rate(brain_tasks_completed[5m])) + 0.001)",
           "legendFormat": "failure rate",
           "refId": "A"
         }
@@ -179,7 +179,7 @@
       "targets": [
         { "expr": "file_lock_held", "legendFormat": "held", "refId": "A" },
         {
-          "expr": "sum(rate(file_lock_conflicts_total[5m]))",
+          "expr": "sum(rate(file_lock_conflicts[5m]))",
           "legendFormat": "conflicts/s",
           "refId": "B"
         }
@@ -252,17 +252,17 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum(rate(http_metrics_requests_total[1m]))",
+          "expr": "sum(rate(http_metrics_requests[1m]))",
           "legendFormat": "/metrics",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(http_healthz_requests_total[1m]))",
+          "expr": "sum(rate(http_healthz_requests[1m]))",
           "legendFormat": "/healthz",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(http_readyz_requests_total[1m]))",
+          "expr": "sum(rate(http_readyz_requests[1m]))",
           "legendFormat": "/readyz",
           "refId": "C"
         }
