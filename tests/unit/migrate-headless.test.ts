@@ -7,7 +7,6 @@ import {
   migrateToHeadless,
   applyHeadlessConfig,
   stripPlatformBlocks,
-  loadHeadlessTemplate,
   escapeTomlStringForTest,
 } from "../../src/cli/migrate-headless.js";
 

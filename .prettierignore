@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+openspec
+pnpm-lock.yaml
+*.md
