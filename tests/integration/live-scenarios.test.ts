@@ -18,7 +18,7 @@ import { isSenderAllowed } from "../../src/config/env.js";
 describe("live integration scenarios", () => {
   it("CAP-INT-01: 三 runtime 顺序 + 并发执行无文件锁冲突", async () => {
     const config = loadConfig({ DEV_BRAIN_ADAPTER_MODE: "stub" });
-    const registry = new AdapterRegistry(config);
+    const registry = AdapterRegistry.create(config);
 
     const locks = new FileLockManager();
     const agentA = "adapter:claude-code:st-1";

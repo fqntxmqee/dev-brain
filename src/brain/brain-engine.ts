@@ -48,6 +48,8 @@ export class BrainEngine {
       subTasks: ReadonlyArray<SubTaskProgress>;
     }
   >();
+  /** T-61: 同一 chat 重复创建 plan 的覆盖次数 */
+  private overwriteCount = 0;
   private readonly fileLocks: FileLockManager;
 
   constructor(private readonly deps: BrainEngineDeps) {
@@ -55,6 +57,11 @@ export class BrainEngine {
   }
 
   createPlan(message: FeishuInboundMessage): BrainTaskPlan {
+    // T-61: 同一 chat 已有待审批计划时，标注被覆盖的旧 plan（不静默丢失）
+    const existing = this.pendingByChat.get(message.chatId);
+    if (existing) {
+      this.recordOverwriteWarning(message.chatId, existing.taskId);
+    }
     const subTasks = buildDefaultSubTasks(message.text);
     const taskId = newTaskId();
     const plan: BrainTaskPlan = {
@@ -68,6 +75,16 @@ export class BrainEngine {
     };
     this.pendingByChat.set(message.chatId, plan);
     return plan;
+  }
+
+  /** T-61: 覆盖事件计数 + 旧 plan 短 ID 输出到 stderr（运维可见） */
+  private recordOverwriteWarning(chatId: string, oldTaskId: string): void {
+    this.overwriteCount += 1;
+    process.stderr.write(
+      `[brain:warn] pending plan overwritten for chat=${chatId} ` +
+        `(old=${oldTaskId.slice(0, 12)}, new incoming). ` +
+        `如需保留旧计划请先 /approve 或 /cancel。\n`,
+    );
   }
 
   /** 注入自定义计划（测试 / 冲突演示） */
@@ -332,6 +349,11 @@ export class BrainEngine {
     };
   }
 
+  /** T-61: 暴露覆盖次数给 status 文本 */
+  getOverwriteCount(): number {
+    return this.overwriteCount;
+  }
+
   /** 列出正在执行的任务进度（T-50：/progress 子命令可查） */
   getActiveProgress(): ReadonlyArray<{
     readonly taskId: string;
@@ -440,7 +462,7 @@ export function createBrainEngine(
   config: DevBrainConfig,
   client?: CcConnectClient,
 ): BrainEngine {
-  const adapters = new AdapterRegistry(config, client);
+  const adapters = AdapterRegistry.create(config, client);
   const orchestrator = new TaskOrchestrator();
   return new BrainEngine({ config, adapters, orchestrator });
 }

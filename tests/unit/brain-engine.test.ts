@@ -56,4 +56,33 @@ describe("BrainEngine via gateway", () => {
       delete process.env.DEV_BRAIN_ALLOW_FROM;
     }
   });
+
+  it("T-61: overwrite counter increments on duplicate createPlan", () => {
+    const reporter = new InMemoryFeishuReporter();
+    process.env.DEV_BRAIN_ALLOW_FROM = "ou_test";
+    try {
+      const app = createDevBrainApp(reporter);
+      const chatId = "test-overwrite";
+      expect(app.brain.getOverwriteCount()).toBe(0);
+      // 直接通过 brain API 触发（不依赖 gateway）
+      app.brain.createPlan({
+        messageId: "a",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "first",
+      });
+      expect(app.brain.getOverwriteCount()).toBe(0);
+      app.brain.createPlan({
+        messageId: "b",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "second",
+      });
+      expect(app.brain.getOverwriteCount()).toBe(1);
+    } finally {
+      delete process.env.DEV_BRAIN_ALLOW_FROM;
+    }
+  });
 });
