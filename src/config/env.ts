@@ -52,6 +52,8 @@ export interface DevBrainConfig {
   readonly ccBridgeTimeoutMs: number;
   readonly ccBridgeReplyPath: string;
   readonly ccBridgeSocket: string;
+  /** DEBUG 模式开关（T-41 收敛 process.env 直读） */
+  readonly debug: boolean;
 }
 
 function expandHome(path: string): string {
@@ -120,6 +122,7 @@ export function loadConfig(
       env.DEV_BRAIN_CC_BRIDGE_SOCKET?.trim() ||
         join(homedir(), ".cc-connect/run/bridge.sock"),
     ),
+    debug: env.DEV_BRAIN_DEBUG?.trim() === "1",
   };
 }
 

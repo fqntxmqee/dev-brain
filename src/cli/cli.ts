@@ -75,7 +75,7 @@ program
 
     process.stdout.write("🧠 Dev Brain 已启动，等待飞书消息…\n");
     await runFeishuEventLoop(app.gateway, (line) => {
-      if (process.env.DEV_BRAIN_DEBUG === "1") {
+      if (config.debug) {
         process.stderr.write(`${line}\n`);
       }
     });

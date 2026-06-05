@@ -1,13 +1,13 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import type { AdapterMode, CcSyncMode, DevBrainConfig } from '../config/env.js';
-import { CcConnectBridge } from './cc-connect-bridge.js';
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import type { AdapterMode, CcSyncMode, DevBrainConfig } from "../config/env.js";
+import { CcConnectBridge } from "./cc-connect-bridge.js";
 import {
   isSocketReachable,
   parseSessionsBody,
   udsHttpRequest,
   type CcConnectSessionInfo,
-} from './cc-connect-http.js';
+} from "./cc-connect-http.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,15 +48,17 @@ export class CcConnectClient {
 
   constructor(options: CcConnectClientOptions) {
     this.options = options;
-    this.bridge = options.bridge ?? new CcConnectBridge({
-      apiSocketPath: options.socketPath,
-      bridgeSocketPath: options.socketPath,
-      mode: options.mode,
-      enabled: false,
-      pollMs: 2000,
-      timeoutMs: 300000,
-      replyPath: '/bridge/reply',
-    });
+    this.bridge =
+      options.bridge ??
+      new CcConnectBridge({
+        apiSocketPath: options.socketPath,
+        bridgeSocketPath: options.socketPath,
+        mode: options.mode,
+        enabled: false,
+        pollMs: 2000,
+        timeoutMs: 300000,
+        replyPath: "/bridge/reply",
+      });
   }
 
   static fromConfig(config: DevBrainConfig): CcConnectClient {
@@ -76,10 +78,14 @@ export class CcConnectClient {
   }
 
   async listSessions(): Promise<ReadonlyArray<CcConnectSessionInfo>> {
-    if (this.options.mode === 'stub') {
+    if (this.options.mode === "stub") {
       return [];
     }
-    const res = await udsHttpRequest(this.options.socketPath, 'GET', '/sessions');
+    const res = await udsHttpRequest(
+      this.options.socketPath,
+      "GET",
+      "/sessions",
+    );
     if (res.statusCode !== 200) {
       return [];
     }
@@ -87,7 +93,7 @@ export class CcConnectClient {
   }
 
   async send(request: CcConnectSendRequest): Promise<CcConnectSendResponse> {
-    if (this.options.mode === 'stub') {
+    if (this.options.mode === "stub") {
       const bridge = await this.bridge.collectReply({
         project: request.project,
         sessionKey: defaultSessionKey(request.project, request.sessionKey),
@@ -95,7 +101,9 @@ export class CcConnectClient {
       });
       return {
         ok: true,
-        output: bridge.text ?? `[stub/${request.project}] ${request.prompt.slice(0, 120)}`,
+        output:
+          bridge.text ??
+          `[stub/${request.project}] ${request.prompt.slice(0, 120)}`,
         replySource: bridge.source,
       };
     }
@@ -108,7 +116,7 @@ export class CcConnectClient {
       };
     }
 
-    if (this.options.syncMode === 'relay') {
+    if (this.options.syncMode === "relay") {
       const relay = await this.sendViaRelay(request);
       if (relay.ok) {
         return relay;
@@ -118,9 +126,11 @@ export class CcConnectClient {
     return this.sendViaHttp(request);
   }
 
-  private async sendViaHttp(request: CcConnectSendRequest): Promise<CcConnectSendResponse> {
+  private async sendViaHttp(
+    request: CcConnectSendRequest,
+  ): Promise<CcConnectSendResponse> {
     const sessionKey = defaultSessionKey(request.project, request.sessionKey);
-    const res = await udsHttpRequest(this.options.socketPath, 'POST', '/send', {
+    const res = await udsHttpRequest(this.options.socketPath, "POST", "/send", {
       project: request.project,
       session_key: sessionKey,
       message: request.prompt,
@@ -140,10 +150,10 @@ export class CcConnectClient {
       parsed = {};
     }
 
-    if (parsed.status !== 'ok') {
+    if (parsed.status !== "ok") {
       return {
         ok: false,
-        error: res.body.trim() || 'cc-connect /send unexpected response',
+        error: res.body.trim() || "cc-connect /send unexpected response",
       };
     }
 
@@ -164,7 +174,7 @@ export class CcConnectClient {
       return {
         ok: true,
         dispatched: true,
-        output: `[cc-connect/${request.project}] dispatched; bridge: ${bridge.error ?? 'no reply'}`,
+        output: `[cc-connect/${request.project}] dispatched; bridge: ${bridge.error ?? "no reply"}`,
         replySource: bridge.source,
       };
     }
@@ -176,15 +186,28 @@ export class CcConnectClient {
     };
   }
 
-  private async sendViaRelay(request: CcConnectSendRequest): Promise<CcConnectSendResponse> {
+  private async sendViaRelay(
+    request: CcConnectSendRequest,
+  ): Promise<CcConnectSendResponse> {
     const sessionKey = defaultSessionKey(request.project, request.sessionKey);
     try {
       const { stdout, stderr } = await execFileAsync(
         this.options.bin,
-        ['relay', 'send', '-t', request.project, '-s', sessionKey, request.prompt],
+        [
+          "relay",
+          "send",
+          "-t",
+          request.project,
+          "-s",
+          sessionKey,
+          request.prompt,
+        ],
         {
           timeout: this.options.relayTimeoutMs,
-          env: { ...process.env, CC_DATA_DIR: this.options.dataDir },
+          env: {
+            CC_DATA_DIR: this.options.dataDir,
+            PATH: process.env.PATH ?? "",
+          },
           maxBuffer: 10 * 1024 * 1024,
         },
       );
@@ -193,10 +216,10 @@ export class CcConnectClient {
         return {
           ok: true,
           output: `[cc-connect relay/${request.project}] (empty response)`,
-          replySource: 'relay',
+          replySource: "relay",
         };
       }
-      return { ok: true, output, replySource: 'relay' };
+      return { ok: true, output, replySource: "relay" };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
