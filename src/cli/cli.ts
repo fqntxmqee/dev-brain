@@ -18,6 +18,13 @@ import {
   undoHeadlessConfig,
 } from "./migrate-headless.js";
 import { toErrorMessage } from "../core/error-utils.js";
+import { defaultLogger } from "../core/logger.js";
+import { GracefulShutdown } from "../core/shutdown.js";
+import {
+  deriveMetricsHost,
+  MetricsServer,
+} from "../observability/metrics-server.js";
+import { getMetrics, startProcessCollector } from "../observability/metrics.js";
 
 const program = new Command();
 
@@ -51,6 +58,7 @@ program
           `- ccSyncMode: ${config.ccSyncMode}`,
           `- ccConnectSocket: ${config.ccConnectSocket}`,
           `- allowFrom: ${config.allowFrom.size ? [...config.allowFrom].join(", ") : "(all)"}`,
+          `- metrics: ${config.metricsEnabled ? `${config.metricsHost || deriveMetricsHost()}:${config.metricsPort}` : "disabled"}`,
           "",
           "去掉 --dry-run 后将运行 lark-cli event +subscribe",
         ].join("\n") + "\n",
@@ -72,6 +80,37 @@ program
       process.exit(2);
     }
     process.stdout.write(`${formatDoctorReport(checks)}\n\n`);
+
+    // v0.7.0: 启动 metrics server + process collector，挂在 GracefulShutdown
+    const shutdown = new GracefulShutdown({
+      timeoutMs: 10_000,
+      logger: (m) => process.stderr.write(`[shutdown] ${m}\n`),
+    });
+
+    let metricsServer: MetricsServer | undefined;
+    if (config.metricsEnabled) {
+      const registry = getMetrics();
+      const host = config.metricsHost || deriveMetricsHost();
+      metricsServer = new MetricsServer({
+        port: config.metricsPort,
+        host,
+        registry,
+        isReady: () => !shutdown["shuttingDown"],
+        logger: defaultLogger.child({ component: "metrics-server" }),
+      });
+      const handle = await metricsServer.start();
+      process.stdout.write(
+        `📊 metrics server listening on http://${host}:${handle.port}\n`,
+      );
+      shutdown.register("metrics-server", () => handle.close());
+      const procCollector = startProcessCollector({
+        registry,
+        intervalMs: 15_000,
+        logger: defaultLogger.child({ component: "process-collector" }),
+      });
+      shutdown.register("process-collector", () => procCollector.stop());
+    }
+    shutdown.onSignal();
 
     process.stdout.write("🧠 Dev Brain 已启动，等待飞书消息…\n");
     await runFeishuEventLoop(app.gateway, (line) => {

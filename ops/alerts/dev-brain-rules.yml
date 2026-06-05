@@ -1,0 +1,97 @@
+groups:
+  - name: dev-brain-v0.7.0
+    interval: 30s
+    rules:
+      - alert: BrainHighFailureRate
+        expr: |
+          sum(rate(brain_tasks_failed[5m]))
+            /
+          (sum(rate(brain_tasks_completed[5m])) + 0.001)
+            > 0.25
+        for: 10m
+        labels:
+          severity: page
+          service: dev-brain
+        annotations:
+          summary: "Brain task failure rate above 25% for 10m"
+          description: |
+            Brain task failure rate has exceeded 25% sustained for 10 minutes.
+            See RUNBOOK §2 BrainHighFailureRate for diagnosis steps.
+
+      - alert: BrainStuckTask
+        expr: histogram_quantile(0.95, sum by (le) (rate(brain_task_duration_seconds_bucket[15m]))) > 1800
+        for: 15m
+        labels:
+          severity: warn
+          service: dev-brain
+        annotations:
+          summary: "Brain task p95 duration > 30 min for 15m"
+          description: |
+            95th percentile brain task duration has been above 30 minutes
+            for 15 minutes. Likely a stuck task or unreachable agent.
+            See RUNBOOK §3 BrainStuckTask.
+
+      - alert: CcConnectSocketDown
+        expr: cc_socket_reachable == 0
+        for: 2m
+        labels:
+          severity: page
+          service: dev-brain
+        annotations:
+          summary: "cc-connect socket unreachable for 2m"
+          description: |
+            The cc-connect UDS at the configured path is not reachable.
+            This means no adapter can dispatch work to Claude/Codex/Cursor.
+            See RUNBOOK §4 CcConnectSocketDown.
+
+      - alert: FileLockContention
+        expr: sum(rate(file_lock_conflicts[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warn
+          service: dev-brain
+        annotations:
+          summary: "File lock conflict rate > 0.5/s for 10m"
+          description: |
+            More than 0.5 file lock conflicts per second sustained for 10 minutes.
+            May indicate agents fighting over the same files.
+            See RUNBOOK §5 FileLockContention.
+
+      - alert: ProcessOomRisk
+        expr: process_heap_bytes > 1.5e9
+        for: 5m
+        labels:
+          severity: warn
+          service: dev-brain
+        annotations:
+          summary: "Process heap > 1.5GB for 5m"
+          description: |
+            V8 heap has exceeded 1.5 GB and stayed there for 5 minutes.
+            Risk of OOM crash. Consider restarting the process.
+            See RUNBOOK §6 ProcessOomRisk.
+
+      - alert: EventLoopLag
+        expr: process_eventloop_lag_seconds > 0.5
+        for: 5m
+        labels:
+          severity: warn
+          service: dev-brain
+        annotations:
+          summary: "Node event loop p99 lag > 500ms for 5m"
+          description: |
+            Event loop is consistently lagging by more than 500ms at p99.
+            CPU starvation or blocking sync work in hot path.
+            See RUNBOOK §7 EventLoopLag.
+
+      - alert: AdapterAllFailed
+        expr: sum(rate(adapter_failed[5m])) > 0 and sum(rate(adapter_sent[5m])) == 0
+        for: 5m
+        labels:
+          severity: page
+          service: dev-brain
+        annotations:
+          summary: "Adapters failing with no successes for 5m"
+          description: |
+            Adapter failures are occurring but no successes — likely all
+            Claude/Codex/Cursor sessions are down or misconfigured.
+            See RUNBOOK §8 AdapterAllFailed.

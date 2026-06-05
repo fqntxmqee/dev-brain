@@ -1,5 +1,7 @@
 import type { DevBrainConfig } from "../config/env.js";
 import { isModuleNotFound } from "../core/error-utils.js";
+import { defaultLogger, type Logger } from "../core/logger.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import type {
   AgentAdapter,
   AdapterEvent,
@@ -12,12 +14,18 @@ import type { CcConnectClient } from "./cc-connect/index.js";
 export class CursorAdapter implements AgentAdapter {
   readonly runtime = "cursor" as const;
   private readonly ccConnectFallback: CcConnectCursorAdapter;
+  private readonly logger: Logger;
+  private readonly metrics = getMetrics();
 
   constructor(
     private readonly config: DevBrainConfig,
     client: CcConnectClient,
   ) {
     this.ccConnectFallback = new CcConnectCursorAdapter(config, client);
+    this.logger = defaultLogger.child({
+      component: "adapter",
+      runtime: "cursor",
+    });
   }
 
   async *send(request: AdapterRequest): AsyncIterable<AdapterEvent> {
@@ -30,6 +38,7 @@ export class CursorAdapter implements AgentAdapter {
           content: "cursor: no CURSOR_API_KEY, falling back to cc-connect",
           timestamp: now,
         };
+        safe(() => this.metrics.inc("bridge.http.fallback"), undefined);
         yield* this.ccConnectFallback.send(request);
         return;
       }
@@ -39,6 +48,7 @@ export class CursorAdapter implements AgentAdapter {
         content: "cursor adapter (stub)",
         timestamp: now,
       };
+      safe(() => this.metrics.inc("adapter.sent"), undefined);
       yield {
         type: "done",
         content: `[cursor stub] workDir=${this.config.workDir} prompt=${request.prompt.slice(0, 80)}…`,
@@ -62,6 +72,8 @@ export class CursorAdapter implements AgentAdapter {
       });
 
       if (result.status === "error") {
+        safe(() => this.metrics.inc("adapter.failed"), undefined);
+        this.logger.warn("cursor sdk returned error status");
         yield {
           type: "error",
           content: result.result ?? "Cursor agent returned error status",
@@ -70,6 +82,10 @@ export class CursorAdapter implements AgentAdapter {
         return;
       }
 
+      safe(() => this.metrics.inc("adapter.sent"), undefined);
+      this.logger.info("cursor sdk ok", {
+        output_len: (result.result ?? "").length,
+      });
       yield {
         type: "done",
         content: result.result?.trim() || "(empty cursor response)",
@@ -77,15 +93,21 @@ export class CursorAdapter implements AgentAdapter {
       };
     } catch (error) {
       if (isModuleNotFound(error, "@cursor/sdk")) {
+        safe(() => this.metrics.inc("bridge.http.fallback"), undefined);
+        this.logger.warn("cursor sdk missing, falling back to cc-connect");
         yield {
           type: "progress",
           content:
             "cursor: @cursor/sdk not installed, falling back to cc-connect",
-          timestamp: new Date().toISOString(),
+          timestamp: now,
         };
         yield* this.ccConnectFallback.send(request);
         return;
       }
+      safe(() => this.metrics.inc("adapter.failed"), undefined);
+      this.logger.error("cursor sdk failed", {
+        err: error instanceof Error ? error.message : String(error),
+      });
       yield {
         type: "error",
         content: `cursor sdk failed: ${

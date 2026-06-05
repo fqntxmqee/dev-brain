@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDevBrainApp } from "../../src/bootstrap.js";
 import { InMemoryFeishuReporter } from "../../src/gateway/feishu-reporter.js";
+import { getMetrics } from "../../src/observability/metrics.js";
 
 /** Covers: L5-BRAIN-01, L5-BRAIN-02, L5-BRAIN-05 */
 describe("BrainEngine via gateway", () => {
@@ -81,6 +82,92 @@ describe("BrainEngine via gateway", () => {
         text: "second",
       });
       expect(app.brain.getOverwriteCount()).toBe(1);
+    } finally {
+      delete process.env.DEV_BRAIN_ALLOW_FROM;
+    }
+  });
+});
+
+/** v0.7.0: brain engine observability hooks */
+describe("BrainEngine observability (v0.7.0)", () => {
+  it("increments_brain_tasks_completed_after_successful_approval", async () => {
+    const metrics = getMetrics();
+    const before = metrics.get("brain.tasks.completed");
+    const reporter = new InMemoryFeishuReporter();
+    process.env.DEV_BRAIN_ALLOW_FROM = "ou_test";
+    try {
+      const app = createDevBrainApp(reporter);
+      const chatId = "obs-chat";
+      await app.gateway.handleMessage({
+        messageId: "obs-1",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "run something",
+      });
+      await app.gateway.handleMessage({
+        messageId: "obs-2",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "/approve",
+      });
+      const after = metrics.get("brain.tasks.completed");
+      expect(after).toBeGreaterThanOrEqual(before + 1);
+    } finally {
+      delete process.env.DEV_BRAIN_ALLOW_FROM;
+    }
+  });
+
+  it("records_brain_task_duration_histogram_after_execution", async () => {
+    const metrics = getMetrics();
+    const before = metrics.histogram("brain.task.duration_seconds").count();
+    const reporter = new InMemoryFeishuReporter();
+    process.env.DEV_BRAIN_ALLOW_FROM = "ou_test";
+    try {
+      const app = createDevBrainApp(reporter);
+      const chatId = "obs-dur-chat";
+      await app.gateway.handleMessage({
+        messageId: "obs-dur-1",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "task duration test",
+      });
+      await app.gateway.handleMessage({
+        messageId: "obs-dur-2",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "/approve",
+      });
+      const after = metrics.histogram("brain.task.duration_seconds").count();
+      expect(after).toBeGreaterThanOrEqual(before + 1);
+    } finally {
+      delete process.env.DEV_BRAIN_ALLOW_FROM;
+    }
+  });
+
+  it("tracks_brain_pending_plans_gauge_through_lifecycle", () => {
+    const metrics = getMetrics();
+    const reporter = new InMemoryFeishuReporter();
+    process.env.DEV_BRAIN_ALLOW_FROM = "ou_test";
+    try {
+      const app = createDevBrainApp(reporter);
+      const chatId = "obs-gauge-chat";
+      const before = metrics.gauge("brain.pending_plans").get();
+      app.brain.createPlan({
+        messageId: "g1",
+        chatId,
+        senderOpenId: "ou_test",
+        senderName: "t",
+        text: "gauge test",
+      });
+      const afterCreate = metrics.gauge("brain.pending_plans").get();
+      expect(afterCreate).toBeGreaterThanOrEqual(before + 1);
+      app.brain.cancelPlan(chatId);
+      const afterCancel = metrics.gauge("brain.pending_plans").get();
+      expect(afterCancel).toBe(afterCreate - 1);
     } finally {
       delete process.env.DEV_BRAIN_ALLOW_FROM;
     }

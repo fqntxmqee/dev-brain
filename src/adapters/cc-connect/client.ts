@@ -5,6 +5,7 @@ import type {
   CcSyncMode,
   DevBrainConfig,
 } from "../../config/env.js";
+import { getMetrics, safe } from "../../observability/metrics.js";
 import { CcConnectBridge } from "./bridge.js";
 import {
   isSocketReachable,
@@ -49,6 +50,7 @@ function defaultSessionKey(project: string, sessionKey?: string): string {
 export class CcConnectClient {
   private readonly options: CcConnectClientOptions;
   private readonly bridge: CcConnectBridge;
+  private readonly metrics = getMetrics();
 
   constructor(options: CcConnectClientOptions) {
     this.options = options;
@@ -78,7 +80,12 @@ export class CcConnectClient {
   }
 
   async ping(): Promise<boolean> {
-    return isSocketReachable(this.options.socketPath);
+    const reachable = await isSocketReachable(this.options.socketPath);
+    safe(
+      () => this.metrics.gauge("cc.socket.reachable").set(reachable ? 1 : 0),
+      undefined,
+    );
+    return reachable;
   }
 
   async listSessions(): Promise<ReadonlyArray<CcConnectSessionInfo>> {
@@ -97,6 +104,20 @@ export class CcConnectClient {
   }
 
   async send(request: CcConnectSendRequest): Promise<CcConnectSendResponse> {
+    const endTimer = safe(
+      () => this.metrics.histogram("cc.send.duration_seconds").startTimer(),
+      () => 0,
+    );
+    try {
+      return await this.sendInner(request);
+    } finally {
+      endTimer();
+    }
+  }
+
+  private async sendInner(
+    request: CcConnectSendRequest,
+  ): Promise<CcConnectSendResponse> {
     if (this.options.mode === "stub") {
       const bridge = await this.bridge.collectReply({
         project: request.project,

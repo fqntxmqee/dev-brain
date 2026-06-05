@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { getMetrics, safe } from "../observability/metrics.js";
 import { LockConflictError } from "./errors.js";
 import type { FileLock } from "./types.js";
 
@@ -19,6 +20,7 @@ export class FileLockManager {
   private readonly timeoutMs: number;
   /** T-78: 上次 expireStaleLocks 清理的锁数量（read + write 合计） */
   private lastExpiredCount = 0;
+  private readonly metrics = getMetrics();
 
   constructor(timeoutMs: number = DEFAULT_LOCK_TIMEOUT_MS) {
     this.timeoutMs = timeoutMs;
@@ -41,6 +43,7 @@ export class FileLockManager {
         this.readLocks.set(filePath, record);
       }
       record.locks.add(`${agentId}:${uuid()}`);
+      this.syncLockHeldGauge();
       return {
         id: uuid(),
         filePath,
@@ -65,6 +68,7 @@ export class FileLockManager {
       expiresAt,
     };
     this.writeLocks.set(filePath, { lock });
+    this.syncLockHeldGauge();
     return lock;
   }
 
@@ -84,6 +88,7 @@ export class FileLockManager {
       if (record?.lock.id === lock.id) {
         this.writeLocks.delete(lock.filePath);
       }
+      this.syncLockHeldGauge();
       return;
     }
 
@@ -98,6 +103,7 @@ export class FileLockManager {
     if (record.locks.size === 0) {
       this.readLocks.delete(lock.filePath);
     }
+    this.syncLockHeldGauge();
   }
 
   getLockedFilePaths(): ReadonlySet<string> {
@@ -116,6 +122,16 @@ export class FileLockManager {
     return this.lastExpiredCount;
   }
 
+  private syncLockHeldGauge(): void {
+    safe(
+      () =>
+        this.metrics
+          .gauge("file.lock.held")
+          .set(this.writeLocks.size + this.readLocks.size),
+      undefined,
+    );
+  }
+
   private expireStaleLocks(): void {
     const now = Date.now();
     let expired = 0;
@@ -132,5 +148,16 @@ export class FileLockManager {
       }
     }
     this.lastExpiredCount = expired;
+    if (expired > 0) {
+      safe(() => this.metrics.inc("file.lock.expired", expired), undefined);
+    }
+    // 每次扫描同步 gauge（read + write 总数）
+    safe(
+      () =>
+        this.metrics
+          .gauge("file.lock.held")
+          .set(this.writeLocks.size + this.readLocks.size),
+      undefined,
+    );
   }
 }

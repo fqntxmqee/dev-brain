@@ -17,6 +17,10 @@ import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
 import { TaskOrchestrator } from "../orchestrator/index.js";
 import { PostmortemStore } from "./postmortem-store.js";
 import { RETRY_MAX } from "../core/constants.js";
+import { defaultLogger, type Logger } from "../core/logger.js";
+import { redactMessage } from "../core/redact.js";
+import { redactPath } from "../core/redact-path.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import {
   buildDefaultSubTasks,
   buildSessionKey,
@@ -32,6 +36,8 @@ export interface BrainEngineDeps {
   readonly fileLocks?: FileLockManager;
   /** T-62/T-65: 可选；不传则不落盘（测试/CLI 子命令常用） */
   readonly postmortemStore?: PostmortemStore;
+  /** v0.7.0: 可选；不传则用 defaultLogger */
+  readonly logger?: Logger;
 }
 
 export type ProgressCallback = (
@@ -56,10 +62,13 @@ export class BrainEngine {
   private overwriteCount = 0;
   private readonly fileLocks: FileLockManager;
   private readonly postmortemStore: PostmortemStore | undefined;
+  private readonly logger: Logger;
+  private readonly metrics = getMetrics();
 
   constructor(private readonly deps: BrainEngineDeps) {
     this.fileLocks = deps.fileLocks ?? new FileLockManager();
     this.postmortemStore = deps.postmortemStore;
+    this.logger = deps.logger ?? defaultLogger.child({ component: "brain" });
   }
 
   createPlan(message: FeishuInboundMessage): BrainTaskPlan {
@@ -80,12 +89,30 @@ export class BrainEngine {
       summary: formatPlanSummary(message.text.trim(), subTasks),
     };
     this.pendingByChat.set(message.chatId, plan);
+    // v0.7.0: gauge + structured log
+    safe(
+      () =>
+        this.metrics.gauge("brain.pending_plans").set(this.pendingByChat.size),
+      undefined,
+    );
+    this.logger.info("plan created", {
+      task_id: taskId,
+      chat_id: message.chatId,
+      prompt: redactMessage(message.text).slice(0, 120),
+      sub_tasks: subTasks.length,
+    });
     return plan;
   }
 
   /** T-61: 覆盖事件计数 + 旧 plan 短 ID 输出到 stderr（运维可见） */
   private recordOverwriteWarning(chatId: string, oldTaskId: string): void {
     this.overwriteCount += 1;
+    safe(() => this.metrics.inc("brain.tasks.overwrite"), undefined);
+    this.logger.warn("pending plan overwritten", {
+      chat_id: chatId,
+      old_task_id: oldTaskId.slice(0, 12),
+    });
+    // 保留原 stderr 文案以兼容运维脚本（grep "brain:warn"）
     process.stderr.write(
       `[brain:warn] pending plan overwritten for chat=${chatId} ` +
         `(old=${oldTaskId.slice(0, 12)}, new incoming). ` +
@@ -106,6 +133,11 @@ export class BrainEngine {
     const plan = this.pendingByChat.get(chatId);
     if (!plan) return false;
     this.pendingByChat.delete(chatId);
+    safe(
+      () =>
+        this.metrics.gauge("brain.pending_plans").set(this.pendingByChat.size),
+      undefined,
+    );
     return true;
   }
 
@@ -124,6 +156,15 @@ export class BrainEngine {
 
     this.pendingByChat.delete(chatId);
     this.activeCount += 1;
+    safe(
+      () =>
+        this.metrics.gauge("brain.pending_plans").set(this.pendingByChat.size),
+      undefined,
+    );
+    safe(
+      () => this.metrics.gauge("brain.active_tasks").set(this.activeCount),
+      undefined,
+    );
 
     const subTaskOutputs: Array<BrainTaskResult["subTaskOutputs"][number]> = [];
     const progressState = new Map<string, SubTaskProgress>(
@@ -150,6 +191,16 @@ export class BrainEngine {
     );
     this.deps.orchestrator.beginExecution(task.id);
 
+    // v0.7.0: child logger + histogram timer
+    const taskLog = this.logger.child({
+      task_id: plan.taskId,
+      chat_id: plan.chatId,
+    });
+    const endTaskTimer = safe(
+      () => this.metrics.histogram("brain.task.duration_seconds").startTimer(),
+      () => 0,
+    );
+
     const emitProgress = async (): Promise<void> => {
       if (!onProgress) return;
       await onProgress({
@@ -160,6 +211,9 @@ export class BrainEngine {
     };
 
     await emitProgress();
+    taskLog.info("task started", {
+      sub_tasks: plan.subTasks.length,
+    });
 
     try {
       const tiers = computeExecutionTiers(plan.subTasks);
@@ -192,6 +246,11 @@ export class BrainEngine {
         };
         this.completed.push(result);
         await this.writePostmortem(result).catch(() => undefined);
+        safe(() => this.metrics.inc("brain.tasks.failed"), undefined);
+        endTaskTimer();
+        taskLog.warn("task done with failures", {
+          duration_ms: undefined,
+        });
         return result;
       }
 
@@ -205,6 +264,9 @@ export class BrainEngine {
       };
       this.completed.push(result);
       await this.writePostmortem(result).catch(() => undefined);
+      safe(() => this.metrics.inc("brain.tasks.completed"), undefined);
+      endTaskTimer();
+      taskLog.info("task done", {});
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -217,10 +279,17 @@ export class BrainEngine {
       };
       this.completed.push(result);
       await this.writePostmortem(result).catch(() => undefined);
+      safe(() => this.metrics.inc("brain.tasks.failed"), undefined);
+      endTaskTimer();
+      taskLog.error("task crashed", { err: message });
       return result;
     } finally {
       this.activeCount = Math.max(0, this.activeCount - 1);
       this.activeTasks.delete(plan.taskId);
+      safe(
+        () => this.metrics.gauge("brain.active_tasks").set(this.activeCount),
+        undefined,
+      );
     }
   }
 
@@ -233,6 +302,15 @@ export class BrainEngine {
   ): Promise<BrainTaskResult["subTaskOutputs"][number] | undefined> {
     const agentId = `adapter:${subTask.runtime}:${subTask.id}`;
     const acquiredLocks: FileLock[] = [];
+    const subLog = this.logger.child({
+      subtask_id: subTask.id,
+      runtime: subTask.runtime,
+    });
+    const endSubTimer = safe(
+      () =>
+        this.metrics.histogram("brain.subtask.duration_seconds").startTimer(),
+      () => 0,
+    );
 
     const setStatus = async (
       status: SubTaskProgress["status"],
@@ -255,6 +333,16 @@ export class BrainEngine {
           ),
         });
       }
+      // v0.7.0: gauge 当前 executing 子任务数
+      if (status === "executing") {
+        const executing = [...progressState.values()].filter(
+          (s) => s.status === "executing",
+        ).length;
+        safe(
+          () => this.metrics.gauge("brain.active_subtasks").set(executing),
+          undefined,
+        );
+      }
       await emitProgress();
     };
 
@@ -264,6 +352,14 @@ export class BrainEngine {
         acquiredLocks.push(
           this.fileLocks.acquire(agentId, filePath, subTask.lockMode),
         );
+      }
+      // v0.7.0: 锁获取成功 → 计数
+      for (const lock of acquiredLocks) {
+        const counterName =
+          lock.mode === "read"
+            ? "file.lock.acquired.read"
+            : "file.lock.acquired.write";
+        safe(() => this.metrics.inc(counterName), undefined);
       }
     } catch (error) {
       if (error instanceof LockConflictError) {
@@ -280,6 +376,12 @@ export class BrainEngine {
             output: `blocked: ${error.message}`,
           },
         );
+        safe(() => this.metrics.inc("file.lock.conflicts"), undefined);
+        subLog.warn("lock conflict", {
+          file: redactPath(error.filePath),
+          holder: error.holderAgentId,
+        });
+        endSubTimer();
         return {
           subTaskId: subTask.id,
           runtime: subTask.runtime,
@@ -321,6 +423,10 @@ export class BrainEngine {
         { output },
       );
       await setStatus("completed");
+      endSubTimer();
+      subLog.info("subtask completed", {
+        output_len: output.length,
+      });
 
       return {
         subTaskId: subTask.id,
@@ -338,6 +444,8 @@ export class BrainEngine {
         },
       );
       await setStatus("failed", message);
+      endSubTimer();
+      subLog.error("subtask failed", { err: message });
       return {
         subTaskId: subTask.id,
         runtime: subTask.runtime,
@@ -347,6 +455,10 @@ export class BrainEngine {
       for (const lock of acquiredLocks) {
         this.fileLocks.releaseLock(lock);
       }
+      safe(
+        () => this.metrics.inc("file.lock.released", acquiredLocks.length),
+        undefined,
+      );
     }
   }
 
@@ -429,6 +541,12 @@ export class BrainEngine {
       plan.subTasks.map((st) => ({ id: st.id, description: st.description })),
     );
     this.deps.orchestrator.beginExecution(retryTask.id);
+    safe(() => this.metrics.inc("brain.subtasks.retried"), undefined);
+    this.logger.info("subtask retry started", {
+      task_id: record.taskId,
+      subtask_id: subTaskId,
+      retry_count: retryCount + 1,
+    });
     const out = await this.executeSubTask(
       plan,
       retryTask.id,

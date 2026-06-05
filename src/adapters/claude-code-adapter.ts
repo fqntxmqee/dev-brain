@@ -1,4 +1,6 @@
 import type { DevBrainConfig } from "../config/env.js";
+import { defaultLogger, type Logger } from "../core/logger.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import type {
   AdapterEvent,
   AdapterRequest,
@@ -16,12 +18,19 @@ interface CancelledSession {
 
 abstract class CcConnectBackedAdapter implements AgentAdapter {
   private readonly cancelled = new Map<string, CancelledSession>();
+  private readonly logger: Logger;
+  private readonly metrics = getMetrics();
 
   protected constructor(
     readonly runtime: "claude-code" | "codex" | "cursor",
     private readonly projectName: string,
     private readonly client: CcConnectClient,
-  ) {}
+  ) {
+    this.logger = defaultLogger.child({
+      component: "adapter",
+      runtime: this.runtime,
+    });
+  }
 
   async *send(request: AdapterRequest): AsyncIterable<AdapterEvent> {
     const sessionKey = request.sessionKey ?? "(no-session)";
@@ -42,13 +51,34 @@ abstract class CcConnectBackedAdapter implements AgentAdapter {
       timestamp: now,
     };
 
-    const result = await this.client.send({
+    const log = this.logger.child({
+      session_key: sessionKey,
       project: this.projectName,
-      prompt: request.prompt,
-      sessionKey: request.sessionKey,
     });
+    const endSendTimer = safe(
+      () => this.metrics.histogram("cc.send.duration_seconds").startTimer(),
+      () => 0,
+    );
+    let result;
+    try {
+      result = await this.client.send({
+        project: this.projectName,
+        prompt: request.prompt,
+        sessionKey: request.sessionKey,
+      });
+    } catch (err) {
+      endSendTimer();
+      safe(() => this.metrics.inc("adapter.failed"), undefined);
+      log.error("adapter send threw", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
 
     if (!result.ok) {
+      endSendTimer();
+      safe(() => this.metrics.inc("adapter.failed"), undefined);
+      log.warn("adapter send returned not-ok", { err: result.error });
       yield {
         type: "error",
         content: result.error ?? "cc-connect send failed",
@@ -57,6 +87,11 @@ abstract class CcConnectBackedAdapter implements AgentAdapter {
       return;
     }
 
+    endSendTimer();
+    safe(() => this.metrics.inc("adapter.sent"), undefined);
+    log.info("adapter send ok", {
+      output_len: (result.output ?? "").length,
+    });
     yield {
       type: "done",
       content: result.output ?? "(empty)",
@@ -70,6 +105,7 @@ abstract class CcConnectBackedAdapter implements AgentAdapter {
       at: new Date().toISOString(),
       reason: reason ?? "user requested",
     });
+    safe(() => this.metrics.inc("adapter.cancelled"), undefined);
   }
 
   /** T-56: 多档状态机 — cancelled > running > idle > not_found */
