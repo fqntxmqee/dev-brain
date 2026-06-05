@@ -12,6 +12,7 @@
     "start": "node dist/cli/cli.js",
     "cli": "tsx src/cli/cli.ts",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
