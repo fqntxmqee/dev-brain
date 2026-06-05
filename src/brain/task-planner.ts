@@ -1,6 +1,10 @@
 import { v4 as uuid } from "uuid";
 import type { AgentRuntime, LockMode, PlannedSubTask } from "../core/types.js";
-import { MAX_DESC_LEN, MAX_SUBTASK_TITLE_LEN } from "../core/constants.js";
+import {
+  MAX_DESC_LEN,
+  MAX_SUBTASK_TITLE_LEN,
+  SHORT_ID_LEN,
+} from "../core/constants.js";
 
 type KeywordMatcher = ReadonlyArray<string>;
 
@@ -209,4 +213,14 @@ export function formatPlanSummary(
 
 export function newTaskId(): string {
   return uuid();
+}
+
+/** 短 ID 12 字符（CAP-BRAIN-04 / T-49 / T-63）。全链路 grep 友好。 */
+export function shortTaskId(taskId: string): string {
+  return taskId.slice(0, SHORT_ID_LEN);
+}
+
+/** 统一 sessionKey 模板（CAP-BRAIN-04） */
+export function buildSessionKey(taskId: string, subTaskId: string): string {
+  return `dev-brain:task:${shortTaskId(taskId)}:subtask:${subTaskId.slice(0, SHORT_ID_LEN)}`;
 }

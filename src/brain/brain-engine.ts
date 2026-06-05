@@ -10,19 +10,17 @@ import type {
   PlannedSubTask,
   SubTaskProgress,
 } from "../core/types.js";
-import {
-  MAX_DESC_LEN,
-  MAX_OUTPUT_LEN,
-  SHORT_ID_LEN,
-} from "../core/constants.js";
+import { MAX_DESC_LEN, MAX_OUTPUT_LEN } from "../core/constants.js";
 import { FileLockManager, LockConflictError } from "../governance/index.js";
 import type { FileLock } from "../governance/types.js";
 import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
 import { TaskOrchestrator } from "../orchestrator/index.js";
 import {
   buildDefaultSubTasks,
+  buildSessionKey,
   formatPlanSummary,
   newTaskId,
+  shortTaskId,
 } from "./task-planner.js";
 
 export interface BrainEngineDeps {
@@ -258,7 +256,7 @@ export class BrainEngine {
       const output = await collectAdapterOutput(adapter, {
         prompt: subTask.description,
         workDir: this.deps.config.workDir,
-        sessionKey: `${plan.taskId}:${subTask.id}`,
+        sessionKey: buildSessionKey(plan.taskId, subTask.id),
       });
 
       this.deps.orchestrator.updateSubTaskStatus(
@@ -333,7 +331,7 @@ function formatExecutionSummary(
   );
   const header = blocked.length > 0 ? "⚠️ 任务部分完成" : "✅ 任务完成";
   return [
-    `${header} #${plan.taskId.slice(0, SHORT_ID_LEN)}`,
+    `${header} #${shortTaskId(plan.taskId)}`,
     ``,
     `需求：${plan.description.slice(0, MAX_DESC_LEN)}`,
     ...(blocked.length
