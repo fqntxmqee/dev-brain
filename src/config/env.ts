@@ -34,6 +34,8 @@ function safeInt(
 
 export type AdapterMode = "stub" | "live";
 export type CcSyncMode = "send" | "relay";
+/** v0.8.0: native = spawn local CLIs; cc-connect = UDS dispatch to cc-connect */
+export type AgentBackend = "native" | "cc-connect";
 
 export interface DevBrainConfig {
   readonly workDir: string;
@@ -66,6 +68,25 @@ export interface DevBrainConfig {
   readonly metricsPort: number;
   /** 空字符串表示由 metrics-server 根据 CI/环境自动决定 */
   readonly metricsHost: string;
+  /** v0.8.0: native = spawn local CLIs (no cc-connect); cc-connect = old UDS path */
+  readonly agentBackend: AgentBackend;
+  readonly claudeBin: string;
+  readonly claudeApiKey: string;
+  readonly claudeBaseUrl: string;
+  readonly claudeModel: string;
+  readonly claudePermissionMode: string;
+  readonly claudeExtraArgs: ReadonlyArray<string>;
+  readonly codexBin: string;
+  readonly codexProfile: string;
+  readonly codexApiKey: string;
+  readonly codexBaseUrl: string;
+  readonly codexModel: string;
+  readonly nativeTimeoutMs: number;
+  /** v0.8.1: cursor local CLI (cursor-agent / agent) */
+  readonly cursorBin: string;
+  readonly cursorMode: "plan" | "ask" | "";
+  /** v0.8.0: cursor fallback when local CLI / SDK unavailable */
+  readonly cursorFallback: "cc-connect" | "error";
 }
 
 function expandHome(path: string): string {
@@ -111,6 +132,12 @@ export function loadConfig(
       env.DEV_BRAIN_ADAPTER_MODE?.trim() === "live" ? "live" : "stub",
     cursorApiKey: env.CURSOR_API_KEY?.trim() ?? "",
     cursorModel: env.DEV_BRAIN_CURSOR_MODEL?.trim() || "composer-2.5",
+    cursorBin: env.DEV_BRAIN_CURSOR_BIN?.trim() || "cursor-agent",
+    cursorMode:
+      env.DEV_BRAIN_CURSOR_MODE?.trim() === "plan" ||
+      env.DEV_BRAIN_CURSOR_MODE?.trim() === "ask"
+        ? (env.DEV_BRAIN_CURSOR_MODE.trim() as "plan" | "ask")
+        : "",
     feishuCards: env.DEV_BRAIN_FEISHU_CARDS?.trim() !== "0",
     feishuCardActions: env.DEV_BRAIN_FEISHU_CARD_ACTIONS?.trim() !== "0",
     ccConfigPath: expandHome(
@@ -138,6 +165,46 @@ export function loadConfig(
     metricsEnabled: env.DEV_BRAIN_METRICS_ENABLED?.trim() !== "0",
     metricsPort: safeInt(env.DEV_BRAIN_METRICS_PORT?.trim(), 9090, PortSchema),
     metricsHost: env.DEV_BRAIN_METRICS_HOST?.trim() ?? "",
+    // v0.8.0: native agent adapters
+    agentBackend:
+      env.DEV_BRAIN_AGENT_BACKEND?.trim() === "cc-connect"
+        ? "cc-connect"
+        : "native",
+    claudeBin: env.DEV_BRAIN_CLAUDE_BIN?.trim() || "claude",
+    claudeApiKey:
+      env.DEV_BRAIN_CLAUDE_API_KEY?.trim() ||
+      env.MINIMAX_API_KEY?.trim() ||
+      env.ANTHROPIC_API_KEY?.trim() ||
+      "",
+    claudeBaseUrl:
+      env.DEV_BRAIN_CLAUDE_BASE_URL?.trim() ||
+      "https://api.minimaxi.com/anthropic",
+    claudeModel: env.DEV_BRAIN_CLAUDE_MODEL?.trim() || "MiniMax-M3-highspeed",
+    claudePermissionMode:
+      env.DEV_BRAIN_CLAUDE_PERMISSION_MODE?.trim() || "bypassPermissions",
+    claudeExtraArgs: (env.DEV_BRAIN_CLAUDE_EXTRA_ARGS?.trim() ?? "")
+      .split(/\s+/)
+      .filter(Boolean),
+    codexBin: env.DEV_BRAIN_CODEX_BIN?.trim() || "codex-minimax",
+    codexProfile: env.DEV_BRAIN_CODEX_PROFILE?.trim() || "m27",
+    codexApiKey:
+      env.DEV_BRAIN_CODEX_API_KEY?.trim() ||
+      env.MINIMAX_API_KEY?.trim() ||
+      env.ANTHROPIC_API_KEY?.trim() ||
+      "",
+    codexBaseUrl:
+      env.DEV_BRAIN_CODEX_BASE_URL?.trim() ||
+      "https://api.minimaxi.com/anthropic",
+    codexModel: env.DEV_BRAIN_CODEX_MODEL?.trim() || "MiniMax-M2.7-highspeed",
+    nativeTimeoutMs: safeInt(
+      env.DEV_BRAIN_NATIVE_TIMEOUT_MS?.trim(),
+      300000,
+      TimeoutMsSchema,
+    ),
+    cursorFallback:
+      env.DEV_BRAIN_CURSOR_FALLBACK?.trim() === "error"
+        ? "error"
+        : "cc-connect",
   };
 }
 

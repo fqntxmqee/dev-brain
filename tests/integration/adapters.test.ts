@@ -20,8 +20,9 @@ describe("Adapter registry integration", () => {
       outputs.push(output);
     }
 
-    expect(outputs[0]).toContain("[bridge stub/workspace-claude]");
-    expect(outputs[1]).toContain("[bridge stub/workspace-codex]");
-    expect(outputs[2]).toContain("[cursor stub]");
+    // v0.8.1: native backend stub message format (cursor 也走 LocalCursorAdapter)
+    expect(outputs[0]).toContain("[claude-code native stub]");
+    expect(outputs[1]).toContain("[codex native stub]");
+    expect(outputs[2]).toContain("[cursor native stub]");
   });
 });

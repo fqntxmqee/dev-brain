@@ -14,9 +14,14 @@ import {
   CodexAdapter,
 } from "../../src/adapters/claude-code-adapter.js";
 import { CursorAdapter } from "../../src/adapters/cursor-adapter.js";
+import { LocalCursorAdapter } from "../../src/adapters/local-cursor-adapter.js";
 import { CcConnectClient } from "../../src/adapters/cc-connect/index.js";
+import { AdapterRegistry } from "../../src/adapters/adapter-registry.js";
+import { LocalClaudeCodeAdapter } from "../../src/adapters/local-claude-code-adapter.js";
+import { LocalCodexAdapter } from "../../src/adapters/local-codex-adapter.js";
 import { loadConfig, type DevBrainConfig } from "../../src/config/env.js";
 import type { AdapterEvent } from "../../src/adapters/types.js";
+import type { AgentAdapter } from "../../src/adapters/types.js";
 
 function makeStubConfig(
   overrides: Partial<DevBrainConfig> = {},
@@ -204,5 +209,63 @@ describe("CursorAdapter (T-56)", () => {
     const client = makeStubClient(config);
     const adapter = new CursorAdapter(config, client);
     await expect(adapter.cancel("s1")).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * v0.8.0: AdapterRegistry routes to native vs cc-connect factory list
+ * based on `config.agentBackend`. This block does NOT call .send(), so
+ * no actual spawn is performed.
+ */
+describe("AdapterRegistry backend routing (v0.8.0)", () => {
+  it("native_backend_uses_local_adapters_for_claude_and_codex", () => {
+    const config = makeStubConfig({ agentBackend: "native" });
+    const registry = AdapterRegistry.create(config);
+    expect(registry.get("claude-code")).toBeInstanceOf(LocalClaudeCodeAdapter);
+    expect(registry.get("codex")).toBeInstanceOf(LocalCodexAdapter);
+    // v0.8.1: native backend 也用 LocalCursorAdapter (cursor-agent CLI)
+    expect(registry.get("cursor")).toBeInstanceOf(LocalCursorAdapter);
+  });
+
+  it("cc_connect_backend_uses_cc_connect_adapters", () => {
+    const config = makeStubConfig({ agentBackend: "cc-connect" });
+    const client = makeStubClient(config);
+    const registry = AdapterRegistry.create(config, client);
+    expect(registry.get("claude-code")).toBeInstanceOf(ClaudeCodeAdapter);
+    expect(registry.get("codex")).toBeInstanceOf(CodexAdapter);
+    expect(registry.get("cursor")).toBeInstanceOf(CursorAdapter);
+  });
+
+  it("registry_lists_all_three_runtimes", () => {
+    const config = makeStubConfig({ agentBackend: "native" });
+    const registry = AdapterRegistry.create(config);
+    expect([...registry.list()].sort()).toEqual([
+      "claude-code",
+      "codex",
+      "cursor",
+    ]);
+  });
+
+  it("custom_factories_override_default_routing", async () => {
+    const config = makeStubConfig({ agentBackend: "native" });
+    const customStub: AgentAdapter = {
+      runtime: "claude-code",
+      async *send() {
+        yield { type: "done", content: "custom", timestamp: "" };
+      },
+      async cancel() {},
+      async status(s) {
+        return { sessionKey: s, state: "idle", lastActivityAt: "" };
+      },
+    };
+    const registry = AdapterRegistry.create(config, undefined, [
+      { runtime: "claude-code", create: () => customStub },
+    ]);
+    expect(registry.get("claude-code")).toBe(customStub);
+  });
+
+  it("get_throws_for_unregistered_runtime", () => {
+    const registry = AdapterRegistry.fromAdapters(new Map());
+    expect(() => registry.get("claude-code")).toThrow(/No adapter registered/);
   });
 });

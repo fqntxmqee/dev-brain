@@ -50,11 +50,20 @@ program
       }
     }
     if (opts.dryRun) {
+      const nativeLine =
+        config.agentBackend === "native"
+          ? [
+              `- agentBackend: ${config.agentBackend} (v0.8.0 — 直接 spawn 本地 CLI)`,
+              `- claude: ${config.claudeBin} (model=${config.claudeModel}, base=${config.claudeBaseUrl})`,
+              `- codex: ${config.codexBin} (model=${config.codexModel}, profile=${config.codexProfile})`,
+            ].join("\n")
+          : `- agentBackend: ${config.agentBackend} (v0.7.0 兼容 — UDS 派发)`;
       process.stdout.write(
         [
           "Dev Brain 配置：",
           `- workDir: ${config.workDir}`,
           `- adapterMode: ${config.adapterMode}`,
+          nativeLine,
           `- ccSyncMode: ${config.ccSyncMode}`,
           `- ccConnectSocket: ${config.ccConnectSocket}`,
           `- allowFrom: ${config.allowFrom.size ? [...config.allowFrom].join(", ") : "(all)"}`,
@@ -66,12 +75,19 @@ program
       return;
     }
 
-    const reporter = new LarkCliFeishuReporter("chat_id");
+    const reporter = new LarkCliFeishuReporter("dev-brain");
     const app = createDevBrainApp(reporter);
 
-    // 启动前预检：必过项（feishu 凭证 / cc-connect 套接字）失败立即退出 2
+    // 启动前预检：必过项失败立即退出 2
+    // v0.8.0: native backend 下 cc-connect 仅作 cursor fallback 可选，
+    // cc_connect_headless 不再阻塞启动（用户保留三 Bot 配置不影响派发）
     const checks = await runDoctorChecks(config);
-    const fatal = checks.filter((c) => !c.ok && c.name !== "cursor_api_key");
+    const skipOnNative = new Set(["cursor_api_key", "cc_connect_headless"]);
+    const fatal = checks.filter(
+      (c) =>
+        !c.ok &&
+        !(config.agentBackend === "native" && skipOnNative.has(c.name)),
+    );
     if (fatal.length > 0) {
       process.stderr.write(`${formatDoctorReport(checks)}\n`);
       process.stderr.write(

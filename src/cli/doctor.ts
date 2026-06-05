@@ -1,8 +1,12 @@
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { CcConnectClient } from "../adapters/cc-connect/index.js";
 import type { DevBrainConfig } from "../config/env.js";
 import { isSocketReachable } from "../adapters/cc-connect/index.js";
 import { looksLikePlaceholder } from "../config/env.js";
 import { checkHeadlessConfig } from "./migrate-headless.js";
+
+const execFile = promisify(execFileCb);
 
 export interface DoctorCheck {
   readonly name: string;
@@ -28,7 +32,30 @@ const NEXT_STEPS: Readonly<Record<string, string>> = {
     "Cursor API key 默认 60 天有效；过期后请在 https://cursor.com/dashboard 重置",
   sender_unauthorized:
     "设置 DEV_BRAIN_ALLOW_FROM=<你的 open_id>（测试期可设 *=*）",
+  native_claude_binary:
+    "安装 Claude Code CLI（`npm i -g @anthropic-ai/claude-code`）或设置 DEV_BRAIN_CLAUDE_BIN",
+  native_codex_binary:
+    "安装 codex 或自定义 wrapper 脚本（默认 `codex-minimax`），或设置 DEV_BRAIN_CODEX_BIN",
+  native_minimax_key:
+    "设置 $MINIMAX_API_KEY 或 $ANTHROPIC_API_KEY，或 DEV_BRAIN_CLAUDE_API_KEY / DEV_BRAIN_CODEX_API_KEY",
+  native_cursor_binary:
+    "安装 Cursor CLI（`cursor-agent`，新版随 Cursor 编辑器自带）或设置 DEV_BRAIN_CURSOR_BIN",
 };
+
+/** v0.8.0: 用 `command -v` 检查 binary 是否在 PATH 中可达 */
+async function checkBinary(
+  bin: string,
+): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const { stdout } = await execFile("command", ["-v", bin], {
+      timeout: 5_000,
+    });
+    const path = stdout.trim().split("\n")[0] ?? "";
+    return { ok: true, detail: path || bin };
+  } catch {
+    return { ok: false, detail: `not found in PATH: ${bin}` };
+  }
+}
 
 export async function runDoctorChecks(
   config: DevBrainConfig,
@@ -41,8 +68,47 @@ export async function runDoctorChecks(
     detail: config.adapterMode,
   });
 
-  // T-72: 单独一项不可达告警（live 模式强相关，stub 跳过）
-  if (config.adapterMode === "live") {
+  // v0.8.0: native backend — 直接 spawn 本地 CLI，不依赖 cc-connect UDS
+  if (config.agentBackend === "native" && config.adapterMode === "live") {
+    const claude = await checkBinary(config.claudeBin);
+    checks.push({
+      name: "native_claude_binary",
+      ok: claude.ok,
+      detail: claude.detail,
+      nextStep: NEXT_STEPS.native_claude_binary,
+    });
+
+    const codex = await checkBinary(config.codexBin);
+    checks.push({
+      name: "native_codex_binary",
+      ok: codex.ok,
+      detail: codex.detail,
+      nextStep: NEXT_STEPS.native_codex_binary,
+    });
+
+    const hasKey = Boolean(config.claudeApiKey || config.codexApiKey);
+    checks.push({
+      name: "native_minimax_key",
+      ok: hasKey,
+      detail: hasKey
+        ? `set (claude=${config.claudeApiKey ? "y" : "n"}, codex=${config.codexApiKey ? "y" : "n"})`
+        : "$MINIMAX_API_KEY / $ANTHROPIC_API_KEY 未设置",
+      nextStep: NEXT_STEPS.native_minimax_key,
+    });
+
+    // v0.8.1: cursor local CLI
+    const cursor = await checkBinary(config.cursorBin);
+    checks.push({
+      name: "native_cursor_binary",
+      ok: cursor.ok,
+      detail: cursor.detail,
+      nextStep: NEXT_STEPS.native_cursor_binary,
+    });
+  }
+
+  // T-72: 单独一项不可达告警（live 模式 + cc-connect backend 强相关）
+  // v0.8.0: native backend 下 cc-connect 仅作 cursor fallback 可选，跳过
+  if (config.adapterMode === "live" && config.agentBackend === "cc-connect") {
     const reachable = await isSocketReachable(config.ccConnectSocket, 2_000);
     checks.push({
       name: "cc_connect_unreachable",
