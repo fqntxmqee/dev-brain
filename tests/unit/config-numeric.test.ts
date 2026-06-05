@@ -33,3 +33,38 @@ describe("config numeric validation", () => {
     expect(c.ccRelayTimeoutMs).toBe(10000);
   });
 });
+
+describe("v0.7.0: metrics server config", () => {
+  it("metrics_enabled_defaults_to_true", () => {
+    expect(loadConfig({}).metricsEnabled).toBe(true);
+  });
+  it("metrics_enabled_can_be_disabled_with_0", () => {
+    expect(loadConfig({ DEV_BRAIN_METRICS_ENABLED: "0" }).metricsEnabled).toBe(
+      false,
+    );
+  });
+  it("metrics_port_defaults_to_9090", () => {
+    expect(loadConfig({}).metricsPort).toBe(9090);
+  });
+  it("metrics_port_accepts_valid", () => {
+    expect(loadConfig({ DEV_BRAIN_METRICS_PORT: "8080" }).metricsPort).toBe(
+      8080,
+    );
+  });
+  it("metrics_port_rejects_zero", () => {
+    expect(loadConfig({ DEV_BRAIN_METRICS_PORT: "0" }).metricsPort).toBe(9090);
+  });
+  it("metrics_port_rejects_99999", () => {
+    expect(loadConfig({ DEV_BRAIN_METRICS_PORT: "99999" }).metricsPort).toBe(
+      9090,
+    );
+  });
+  it("metrics_host_defaults_to_empty", () => {
+    expect(loadConfig({}).metricsHost).toBe("");
+  });
+  it("metrics_host_trims_whitespace", () => {
+    expect(
+      loadConfig({ DEV_BRAIN_METRICS_HOST: "  127.0.0.1  " }).metricsHost,
+    ).toBe("127.0.0.1");
+  });
+});

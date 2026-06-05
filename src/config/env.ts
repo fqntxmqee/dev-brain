@@ -15,6 +15,13 @@ const PollMsSchema = z
   .transform((s) => Number.parseInt(s, 10))
   .refine((n) => n >= 50 && n <= 60_000, "must be in [50, 60_000]ms");
 
+/** v0.7.0: 端口号（1-65535） */
+const PortSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform((s) => Number.parseInt(s, 10))
+  .refine((n) => n >= 1 && n <= 65535, "must be in [1, 65535]");
+
 function safeInt(
   raw: string | undefined,
   fallback: number,
@@ -54,6 +61,11 @@ export interface DevBrainConfig {
   readonly ccBridgeSocket: string;
   /** DEBUG 模式开关（T-41 收敛 process.env 直读） */
   readonly debug: boolean;
+  /** v0.7.0: observability — metrics server (true=open /metrics endpoint) */
+  readonly metricsEnabled: boolean;
+  readonly metricsPort: number;
+  /** 空字符串表示由 metrics-server 根据 CI/环境自动决定 */
+  readonly metricsHost: string;
 }
 
 function expandHome(path: string): string {
@@ -123,6 +135,9 @@ export function loadConfig(
         join(homedir(), ".cc-connect/run/bridge.sock"),
     ),
     debug: env.DEV_BRAIN_DEBUG?.trim() === "1",
+    metricsEnabled: env.DEV_BRAIN_METRICS_ENABLED?.trim() !== "0",
+    metricsPort: safeInt(env.DEV_BRAIN_METRICS_PORT?.trim(), 9090, PortSchema),
+    metricsHost: env.DEV_BRAIN_METRICS_HOST?.trim() ?? "",
   };
 }
 
