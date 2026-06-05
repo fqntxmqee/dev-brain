@@ -1,12 +1,43 @@
-import { copyFile, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+  copyFile,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const MAX_BACKUPS = 5; // T-44
+
+async function rotateBackups(
+  sourcePath: string,
+  keep: number = MAX_BACKUPS,
+): Promise<void> {
+  const dir = dirname(sourcePath);
+  const base = sourcePath.split("/").pop() ?? "config.toml";
+  const prefix = `${base}.bak.`;
+  const entries = await readdir(dir);
+  const matches = entries
+    .filter((e) => e.startsWith(prefix))
+    .map((e) => ({
+      name: e,
+      ts: Number.parseInt(e.slice(prefix.length), 10) || 0,
+    }))
+    .sort((a, b) => b.ts - a.ts);
+  for (const stale of matches.slice(keep)) {
+    await unlink(join(dir, stale.name)).catch(() => undefined);
+  }
+}
 
 export interface HeadlessCheckResult {
   readonly configPath: string;
   readonly exists: boolean;
   readonly hasPlatforms: boolean;
   readonly projectCount: number;
+  readonly schemaVersion: string | undefined;
   readonly issues: ReadonlyArray<string>;
   readonly ok: boolean;
 }
@@ -23,6 +54,9 @@ const PLATFORM_MARKERS = [
   /^\s*type\s*=\s*["']?feishu["']?/m,
 ];
 
+/** T-77: dev-brain 期望的 schema_version */
+const EXPECTED_SCHEMA_VERSION = "1";
+
 function countProjects(content: string): number {
   return (content.match(/\[\[projects\]\]/g) ?? []).length;
 }
@@ -31,8 +65,13 @@ function hasPlatformSections(content: string): boolean {
   return PLATFORM_MARKERS.some((re) => re.test(content));
 }
 
+function parseSchemaVersion(content: string): string | undefined {
+  const m = content.match(/^\s*schema_version\s*=\s*"?([^"\s]+)"?\s*$/m);
+  return m?.[1];
+}
+
 export function stripPlatformBlocks(content: string): string {
-  const lines = content.split('\n');
+  const lines = content.split("\n");
   const out: string[] = [];
   let skip = false;
 
@@ -52,16 +91,18 @@ export function stripPlatformBlocks(content: string): string {
     out.push(line);
   }
 
-  return `${out.join('\n').trim()}\n`;
+  return `${out.join("\n").trim()}\n`;
 }
 
-export async function checkHeadlessConfig(configPath: string): Promise<HeadlessCheckResult> {
+export async function checkHeadlessConfig(
+  configPath: string,
+): Promise<HeadlessCheckResult> {
   const issues: string[] = [];
-  let content = '';
+  let content = "";
   let exists = false;
 
   try {
-    content = await readFile(configPath, 'utf8');
+    content = await readFile(configPath, "utf8");
     exists = true;
   } catch {
     issues.push(`配置文件不存在: ${configPath}`);
@@ -70,6 +111,7 @@ export async function checkHeadlessConfig(configPath: string): Promise<HeadlessC
       exists: false,
       hasPlatforms: false,
       projectCount: 0,
+      schemaVersion: undefined,
       issues,
       ok: false,
     };
@@ -77,15 +119,30 @@ export async function checkHeadlessConfig(configPath: string): Promise<HeadlessC
 
   const hasPlatforms = hasPlatformSections(content);
   const projectCount = countProjects(content);
+  const schemaVersion = parseSchemaVersion(content);
 
   if (hasPlatforms) {
-    issues.push('检测到 [projects.platforms] — cc-connect 三 Bot 应迁移为 headless（仅 agent + api.sock）');
+    issues.push(
+      "检测到 [projects.platforms] — cc-connect 三 Bot 应迁移为 headless（仅 agent + api.sock）",
+    );
   }
   if (projectCount === 0) {
-    issues.push('未找到 [[projects]] 定义');
+    issues.push("未找到 [[projects]] 定义");
   }
   if (projectCount > 0 && projectCount < 3) {
-    issues.push(`仅 ${projectCount} 个 project，建议配置 workspace-claude/codex/cursor`);
+    issues.push(
+      `仅 ${projectCount} 个 project，建议配置 workspace-claude/codex/cursor`,
+    );
+  }
+  // T-77: schema_version 校验
+  if (schemaVersion === undefined) {
+    issues.push(
+      `缺少 schema_version 字段（dev-brain 期望 "${EXPECTED_SCHEMA_VERSION}"）`,
+    );
+  } else if (schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+    issues.push(
+      `schema_version="${schemaVersion}" 与 dev-brain 期望 "${EXPECTED_SCHEMA_VERSION}" 不一致，可能导致 migrate 应用冲突`,
+    );
   }
 
   return {
@@ -93,42 +150,63 @@ export async function checkHeadlessConfig(configPath: string): Promise<HeadlessC
     exists: true,
     hasPlatforms,
     projectCount,
+    schemaVersion,
     issues,
-    ok: exists && !hasPlatforms && projectCount >= 1,
+    ok:
+      exists &&
+      !hasPlatforms &&
+      projectCount >= 1 &&
+      schemaVersion === EXPECTED_SCHEMA_VERSION,
   };
 }
 
+function escapeTomlString(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+}
+
+/** @internal 测试导出 */
+export const escapeTomlStringForTest = escapeTomlString;
+
 export async function loadHeadlessTemplate(workDir: string): Promise<string> {
   const here = dirname(fileURLToPath(import.meta.url));
-  const templatePath = join(here, '../../config/cc-connect.headless.example.toml');
-  const raw = await readFile(templatePath, 'utf8');
-  return raw.replace(/work_dir = ".*"/g, `work_dir = "${workDir}"`);
+  const templatePath = join(
+    here,
+    "../../config/cc-connect.headless.example.toml",
+  );
+  const raw = await readFile(templatePath, "utf8");
+  return raw.replace(
+    /work_dir = ".*"/g,
+    `work_dir = "${escapeTomlString(workDir)}"`,
+  );
 }
 
 export async function buildHeadlessContent(
   sourcePath: string,
   workDir: string,
   headerLines: ReadonlyArray<string> = [
-    '# Generated by dev-brain migrate-headless',
+    "# Generated by dev-brain migrate-headless",
     `# Source: ${sourcePath}`,
-    '',
+    "",
   ],
 ): Promise<string> {
   const check = await checkHeadlessConfig(sourcePath);
   let body: string;
 
   if (check.exists) {
-    const source = await readFile(sourcePath, 'utf8');
+    const source = await readFile(sourcePath, "utf8");
     body = check.hasPlatforms ? stripPlatformBlocks(source) : source;
   } else {
     body = await loadHeadlessTemplate(workDir);
   }
 
-  if (!body.includes('[[projects]]')) {
+  if (!body.includes("[[projects]]")) {
     body = await loadHeadlessTemplate(workDir);
   }
 
-  return `${headerLines.join('\n')}${body}`;
+  return `${headerLines.join("\n")}${body}`;
 }
 
 export async function migrateToHeadless(options: {
@@ -137,7 +215,10 @@ export async function migrateToHeadless(options: {
   readonly workDir: string;
   readonly dryRun?: boolean;
 }): Promise<HeadlessMigrateResult> {
-  const output = await buildHeadlessContent(options.sourcePath, options.workDir);
+  const output = await buildHeadlessContent(
+    options.sourcePath,
+    options.workDir,
+  );
 
   if (options.dryRun) {
     return {
@@ -147,7 +228,7 @@ export async function migrateToHeadless(options: {
     };
   }
 
-  await writeFile(options.outputPath, output, 'utf8');
+  await writeFile(options.outputPath, output, "utf8");
   return {
     outputPath: options.outputPath,
     written: true,
@@ -171,9 +252,9 @@ export async function applyHeadlessConfig(options: {
   if (check.ok) {
     return {
       configPath: options.sourcePath,
-      backupPath: '',
+      backupPath: "",
       applied: false,
-      message: '配置已是 headless，无需切换。',
+      message: "配置已是 headless，无需切换。",
     };
   }
 
@@ -187,34 +268,96 @@ export async function applyHeadlessConfig(options: {
     };
   }
 
-  const content = await buildHeadlessContent(options.sourcePath, options.workDir, [
-    '# Applied by dev-brain migrate-headless --apply',
-    `# Backup: ${backupPath}`,
-    '',
-  ]);
+  const content = await buildHeadlessContent(
+    options.sourcePath,
+    options.workDir,
+    [
+      "# Applied by dev-brain migrate-headless --apply",
+      `# Backup: ${backupPath}`,
+      "",
+    ],
+  );
 
+  // 原子写入（CAP-CLI-11 / T-73）：
+  //   1. 先 copyFile 备份原文件（独立步骤，失败不污染）
+  //   2. writeFile(.tmp.new) → rename(.tmp.new, real)
+  //   3. 任一步失败清理 .tmp.new，保留 .bak.<ts>
   await copyFile(options.sourcePath, backupPath);
-  await writeFile(options.sourcePath, content, 'utf8');
+  await rotateBackups(options.sourcePath);
+  const tmpNew = `${options.sourcePath}.tmp.new`;
+  try {
+    await writeFile(tmpNew, content, "utf8");
+    await rename(tmpNew, options.sourcePath);
+  } catch (err) {
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(tmpNew);
+    } catch {
+      // ignore cleanup failure
+    }
+    throw err;
+  }
 
   return {
     configPath: options.sourcePath,
     backupPath,
     applied: true,
-    message: `已应用 headless 配置。备份：${backupPath}。请重启 cc-connect daemon。`,
+    message: `已应用 headless 配置。备份：${backupPath}。请重启 cc-connect daemon。\n回滚：pnpm cli -- migrate-headless --undo ${backupPath}`,
+  };
+}
+
+export interface HeadlessUndoResult {
+  readonly configPath: string;
+  readonly backupPath: string;
+  readonly restored: boolean;
+  readonly message: string;
+}
+
+/**
+ * 把 backup 文件内容原子回滚到 sourcePath（T-35 / CAP-CLI-03）。
+ * 写入流程：writeFile(.tmp.new) → rename(.tmp.new, sourcePath)
+ * 备份文件不存在则返 1。
+ */
+export async function undoHeadlessConfig(options: {
+  readonly backupPath: string;
+  readonly targetPath: string;
+}): Promise<HeadlessUndoResult> {
+  try {
+    await stat(options.backupPath);
+  } catch {
+    return {
+      configPath: options.targetPath,
+      backupPath: options.backupPath,
+      restored: false,
+      message: `备份不存在：${options.backupPath}`,
+    };
+  }
+
+  const content = await readFile(options.backupPath, "utf8");
+  const tmp = `${options.targetPath}.tmp.new`;
+  await writeFile(tmp, content, "utf8");
+  await rename(tmp, options.targetPath);
+
+  return {
+    configPath: options.targetPath,
+    backupPath: options.backupPath,
+    restored: true,
+    message: `Restored config from ${options.backupPath}`,
   };
 }
 
 export function formatHeadlessCheckReport(check: HeadlessCheckResult): string {
   const lines = [
-    '🔧 cc-connect Headless 检查',
+    "🔧 cc-connect Headless 检查",
     `- 路径: ${check.configPath}`,
-    `- 存在: ${check.exists ? 'yes' : 'no'}`,
+    `- 存在: ${check.exists ? "yes" : "no"}`,
     `- projects: ${check.projectCount}`,
-    `- platforms: ${check.hasPlatforms ? 'yes (需迁移)' : 'no'}`,
-    `- 结论: ${check.ok ? '✅ headless 就绪' : '⚠️ 需迁移'}`,
+    `- platforms: ${check.hasPlatforms ? "yes (需迁移)" : "no"}`,
+    `- schema_version: ${check.schemaVersion ?? "(missing)"}`,
+    `- 结论: ${check.ok ? "✅ headless 就绪" : "⚠️ 需迁移"}`,
   ];
   if (check.issues.length) {
-    lines.push('', '问题:', ...check.issues.map((i) => `- ${i}`));
+    lines.push("", "问题:", ...check.issues.map((i) => `- ${i}`));
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }

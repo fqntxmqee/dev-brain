@@ -1,10 +1,17 @@
-export const AGENT_RUNTIMES = ['claude-code', 'codex', 'cursor'] as const;
+export const AGENT_RUNTIMES = ["claude-code", "codex", "cursor"] as const;
 export type AgentRuntime = (typeof AGENT_RUNTIMES)[number];
 
-export const TASK_PHASES = ['draft', 'awaiting_approval', 'executing', 'completed', 'failed', 'cancelled'] as const;
+export const TASK_PHASES = [
+  "draft",
+  "awaiting_approval",
+  "executing",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
 export type TaskPhase = (typeof TASK_PHASES)[number];
 
-export const LOCK_MODES = ['none', 'read', 'write'] as const;
+export const LOCK_MODES = ["none", "read", "write"] as const;
 export type LockMode = (typeof LOCK_MODES)[number];
 
 export interface PlannedSubTask {
@@ -19,7 +26,13 @@ export interface PlannedSubTask {
 export interface SubTaskProgress {
   readonly id: string;
   readonly runtime: AgentRuntime;
-  readonly status: 'pending' | 'assigned' | 'executing' | 'completed' | 'failed' | 'blocked';
+  readonly status:
+    | "pending"
+    | "assigned"
+    | "executing"
+    | "completed"
+    | "failed"
+    | "blocked";
   readonly detail?: string;
 }
 
@@ -50,15 +63,22 @@ export interface BrainTaskResult {
   }>;
 }
 
-export interface FeishuInboundMessage {
+/**
+ * 平台无关的入站消息（T-33 / CAP-GW-01）。
+ * 飞书 / Slack / 钉钉的 gateway 适配层都构造此结构交给 BrainEngine。
+ */
+export interface InboundMessage {
   readonly messageId: string;
   readonly chatId: string;
   readonly senderOpenId: string;
-  readonly senderName: string;
+  readonly senderName?: string;
   readonly text: string;
 }
 
-export type CardActionType = 'approve' | 'cancel';
+/** @deprecated use InboundMessage — 保留别名以兼容旧 import */
+export type FeishuInboundMessage = InboundMessage;
+
+export type CardActionType = "approve" | "cancel";
 
 export interface FeishuCardAction {
   readonly action: CardActionType;
@@ -69,8 +89,8 @@ export interface FeishuCardAction {
 }
 
 export type FeishuInboundEvent =
-  | { readonly kind: 'message'; readonly message: FeishuInboundMessage }
-  | { readonly kind: 'card_action'; readonly action: FeishuCardAction };
+  | { readonly kind: "message"; readonly message: InboundMessage }
+  | { readonly kind: "card_action"; readonly action: FeishuCardAction };
 
 export interface BrainStatusSnapshot {
   readonly pendingApprovals: number;

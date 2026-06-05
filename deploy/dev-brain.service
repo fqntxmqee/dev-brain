@@ -1,0 +1,22 @@
+[Unit]
+Description=Dev Brain — 飞书多 Agent 大脑
+After=network.target
+Wants=cc-connect.service
+
+[Service]
+Type=simple
+User=fukai
+Group=fukai
+WorkingDirectory=/Users/fukai/workspace/dev-brain
+EnvironmentFile=/Users/fukai/workspace/dev-brain/.env
+ExecStart=/usr/local/bin/node /Users/fukai/workspace/dev-brain/dist/cli.js start
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/dev-brain/dev-brain.log
+StandardError=append:/var/log/dev-brain/dev-brain.err
+# 优雅停机：先 SIGTERM 触发 GracefulShutdown，10s 后 SIGKILL
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

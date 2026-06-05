@@ -1,6 +1,6 @@
-import { v4 as uuid } from 'uuid';
-import { LockConflictError } from './errors.js';
-import type { FileLock } from './types.js';
+import { v4 as uuid } from "uuid";
+import { LockConflictError } from "./errors.js";
+import type { FileLock } from "./types.js";
 
 const DEFAULT_LOCK_TIMEOUT_MS = 300_000;
 
@@ -8,33 +8,44 @@ interface WriteLockRecord {
   readonly lock: FileLock;
 }
 
+interface ReadLockRecord {
+  readonly locks: Set<string>;
+  readonly expiresAt: number;
+}
+
 export class FileLockManager {
   private readonly writeLocks = new Map<string, WriteLockRecord>();
-  private readonly readCounts = new Map<string, Map<string, number>>();
+  private readonly readLocks = new Map<string, ReadLockRecord>();
   private readonly timeoutMs: number;
+  /** T-78: 上次 expireStaleLocks 清理的锁数量（read + write 合计） */
+  private lastExpiredCount = 0;
 
   constructor(timeoutMs: number = DEFAULT_LOCK_TIMEOUT_MS) {
     this.timeoutMs = timeoutMs;
   }
 
-  acquire(agentId: string, filePath: string, mode: 'read' | 'write'): FileLock {
+  acquire(agentId: string, filePath: string, mode: "read" | "write"): FileLock {
     this.expireStaleLocks();
     const now = Date.now();
-    const expiresAt = new Date(now + this.timeoutMs).toISOString();
+    const expiresAtMs = now + this.timeoutMs;
+    const expiresAt = new Date(expiresAtMs).toISOString();
 
-    if (mode === 'read') {
+    if (mode === "read") {
       const write = this.writeLocks.get(filePath);
       if (write && write.lock.agentId !== agentId) {
         throw new LockConflictError(filePath, write.lock.agentId, agentId);
       }
-      const byAgent = this.readCounts.get(filePath) ?? new Map<string, number>();
-      byAgent.set(agentId, (byAgent.get(agentId) ?? 0) + 1);
-      this.readCounts.set(filePath, byAgent);
+      let record = this.readLocks.get(filePath);
+      if (!record || record.expiresAt < now) {
+        record = { locks: new Set(), expiresAt: expiresAtMs };
+        this.readLocks.set(filePath, record);
+      }
+      record.locks.add(`${agentId}:${uuid()}`);
       return {
         id: uuid(),
         filePath,
         agentId,
-        mode: 'read',
+        mode: "read",
         acquiredAt: new Date(now).toISOString(),
         expiresAt,
       };
@@ -49,7 +60,7 @@ export class FileLockManager {
       id: uuid(),
       filePath,
       agentId,
-      mode: 'write',
+      mode: "write",
       acquiredAt: new Date(now).toISOString(),
       expiresAt,
     };
@@ -68,7 +79,7 @@ export class FileLockManager {
 
   /** Release a lock acquired via acquire() using the returned FileLock object. */
   releaseLock(lock: FileLock): void {
-    if (lock.mode === 'write') {
+    if (lock.mode === "write") {
       const record = this.writeLocks.get(lock.filePath);
       if (record?.lock.id === lock.id) {
         this.writeLocks.delete(lock.filePath);
@@ -76,16 +87,16 @@ export class FileLockManager {
       return;
     }
 
-    const byAgent = this.readCounts.get(lock.filePath);
-    if (!byAgent) return;
-    const count = byAgent.get(lock.agentId) ?? 0;
-    if (count <= 1) {
-      byAgent.delete(lock.agentId);
-    } else {
-      byAgent.set(lock.agentId, count - 1);
+    // Read 模式无法可靠用单 lock id 区分；改为对 filePath 全量清空该 agent 的 read 锁
+    const record = this.readLocks.get(lock.filePath);
+    if (!record) return;
+    for (const id of [...record.locks]) {
+      if (id.startsWith(`${lock.agentId}:`)) {
+        record.locks.delete(id);
+      }
     }
-    if (byAgent.size === 0) {
-      this.readCounts.delete(lock.filePath);
+    if (record.locks.size === 0) {
+      this.readLocks.delete(lock.filePath);
     }
   }
 
@@ -94,12 +105,32 @@ export class FileLockManager {
     return new Set([...this.writeLocks.keys()]);
   }
 
+  /** 统计所有未过期 read 锁的总数（用于监控） */
+  getReadLockCount(filePath: string): number {
+    this.expireStaleLocks();
+    return this.readLocks.get(filePath)?.locks.size ?? 0;
+  }
+
+  /** T-78: 上次 expireStaleLocks 清理掉的锁数量（read + write） */
+  getLastExpiredCount(): number {
+    return this.lastExpiredCount;
+  }
+
   private expireStaleLocks(): void {
     const now = Date.now();
+    let expired = 0;
     for (const [path, record] of this.writeLocks) {
       if (new Date(record.lock.expiresAt).getTime() < now) {
         this.writeLocks.delete(path);
+        expired += 1;
       }
     }
+    for (const [path, record] of this.readLocks) {
+      if (record.expiresAt < now) {
+        this.readLocks.delete(path);
+        expired += 1;
+      }
+    }
+    this.lastExpiredCount = expired;
   }
 }
