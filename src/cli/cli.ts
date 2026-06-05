@@ -9,7 +9,7 @@ import {
 import { runFeishuEventLoop } from "../gateway/feishu-gateway.js";
 import { loadConfig, detectPlaceholders } from "../config/env.js";
 import { formatDoctorReport, runDoctorChecks } from "./doctor.js";
-import { CcConnectClient } from "../adapters/cc-connect-client.js";
+import { CcConnectClient } from "../adapters/cc-connect/index.js";
 import {
   formatHeadlessCheckReport,
   checkHeadlessConfig,

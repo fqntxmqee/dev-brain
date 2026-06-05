@@ -5,7 +5,7 @@ import {
   InMemoryFeishuReporter,
   type FeishuReporter,
 } from "./gateway/feishu-reporter.js";
-import type { CcConnectClient } from "./adapters/cc-connect-client.js";
+import type { CcConnectClient } from "./adapters/cc-connect/index.js";
 
 export interface DevBrainApp {
   readonly config: DevBrainConfig;

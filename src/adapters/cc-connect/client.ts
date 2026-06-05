@@ -1,13 +1,17 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AdapterMode, CcSyncMode, DevBrainConfig } from "../config/env.js";
-import { CcConnectBridge } from "./cc-connect-bridge.js";
+import type {
+  AdapterMode,
+  CcSyncMode,
+  DevBrainConfig,
+} from "../../config/env.js";
+import { CcConnectBridge } from "./bridge.js";
 import {
   isSocketReachable,
   parseSessionsBody,
   udsHttpRequest,
   type CcConnectSessionInfo,
-} from "./cc-connect-http.js";
+} from "./http.js";
 
 const execFileAsync = promisify(execFile);
 

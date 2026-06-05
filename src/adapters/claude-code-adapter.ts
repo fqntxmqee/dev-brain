@@ -6,7 +6,7 @@ import type {
   AdapterSessionStatus,
   AgentAdapter,
 } from "./types.js";
-import { CcConnectClient } from "./cc-connect-client.js";
+import { CcConnectClient } from "./cc-connect/index.js";
 
 /** T-57: 本地追踪已取消会话 — cc-connect 暂无 cancel API，但需保留 intent */
 interface CancelledSession {

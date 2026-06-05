@@ -1,6 +1,6 @@
 import type { DevBrainConfig } from "../config/env.js";
 import { AdapterRegistry, collectAdapterOutput } from "../adapters/index.js";
-import type { CcConnectClient } from "../adapters/cc-connect-client.js";
+import type { CcConnectClient } from "../adapters/cc-connect/index.js";
 import type {
   BrainStatusSnapshot,
   BrainTaskPlan,

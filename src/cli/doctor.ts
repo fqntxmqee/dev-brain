@@ -1,6 +1,6 @@
-import { CcConnectClient } from "../adapters/cc-connect-client.js";
+import { CcConnectClient } from "../adapters/cc-connect/index.js";
 import type { DevBrainConfig } from "../config/env.js";
-import { isSocketReachable } from "../adapters/cc-connect-http.js";
+import { isSocketReachable } from "../adapters/cc-connect/index.js";
 import { looksLikePlaceholder } from "../config/env.js";
 import { checkHeadlessConfig } from "./migrate-headless.js";
 

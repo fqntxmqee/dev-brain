@@ -1,6 +1,6 @@
 import type { DevBrainConfig } from "../config/env.js";
 import type { AgentRuntime } from "../core/types.js";
-import { CcConnectClient } from "./cc-connect-client.js";
+import { CcConnectClient } from "./cc-connect/index.js";
 import { ClaudeCodeAdapter, CodexAdapter } from "./claude-code-adapter.js";
 import { CursorAdapter } from "./cursor-adapter.js";
 import type { AgentAdapter } from "./types.js";

@@ -1,5 +1,5 @@
-import { udsHttpRequest } from "./cc-connect-http.js";
-import type { AdapterMode, DevBrainConfig } from "../config/env.js";
+import { udsHttpRequest } from "./http.js";
+import type { AdapterMode, DevBrainConfig } from "../../config/env.js";
 
 export interface BridgeReplyRequest {
   readonly project: string;
@@ -158,8 +158,7 @@ export class CcConnectBridge {
     request: BridgeReplyRequest,
   ): Promise<BridgeReplyResult> {
     try {
-      const { connectBridgeWebSocket } =
-        await import("./cc-connect-bridge-ws.js");
+      const { connectBridgeWebSocket } = await import("./ws.js");
       const text = await connectBridgeWebSocket({
         socketPath: this.options.bridgeSocketPath,
         project: request.project,

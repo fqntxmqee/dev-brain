@@ -1,0 +1,23 @@
+# docker-compose for dev-brain (T-38)
+# 依赖：cc-connect daemon（已存在宿主机 socket 通过 bind mount 注入）
+version: "3.9"
+services:
+  dev-brain:
+    build: .
+    container_name: dev-brain
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./.env:/app/.env:ro
+      - /Users/fukai/.cc-connect:/home/node/.cc-connect:ro
+      - dev-brain-data:/var/lib/dev-brain
+    # 暴露 health 端口（T-37 metrics 可选）
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 3s
+
+volumes:
+  dev-brain-data:

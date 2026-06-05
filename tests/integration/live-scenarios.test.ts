@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { AdapterRegistry } from "../../src/adapters/adapter-registry.js";
 import { collectAdapterOutput } from "../../src/adapters/types.js";
 import { loadConfig } from "../../src/config/env.js";
-import { CcConnectBridge } from "../../src/adapters/cc-connect-bridge.js";
-import { CcConnectClient } from "../../src/adapters/cc-connect-client.js";
+import { CcConnectBridge } from "../../src/adapters/cc-connect/index.js";
+import { CcConnectClient } from "../../src/adapters/cc-connect/index.js";
 import {
   LockConflictError,
   FileLockManager,

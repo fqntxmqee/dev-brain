@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { translateUdsError } from "../../src/adapters/cc-connect-http.js";
+import { translateUdsError } from "../../src/adapters/cc-connect/index.js";
 
 describe("translateUdsError", () => {
   it("translates_ENOENT_to_friendly_chinese", () => {

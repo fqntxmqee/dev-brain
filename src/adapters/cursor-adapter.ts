@@ -7,7 +7,7 @@ import type {
   AdapterSessionStatus,
 } from "./types.js";
 import { CcConnectCursorAdapter } from "./claude-code-adapter.js";
-import type { CcConnectClient } from "./cc-connect-client.js";
+import type { CcConnectClient } from "./cc-connect/index.js";
 
 export class CursorAdapter implements AgentAdapter {
   readonly runtime = "cursor" as const;
