@@ -16,12 +16,12 @@ export default defineConfig({
         "src/cli/doctor.ts",
       ],
       thresholds: {
-        // 基线（CAP-QUAL-01 目标 80%）：
-        // 当前 55.7% lines / 51.7% branches，逐步提升。
-        lines: 50,
-        functions: 60,
-        branches: 50,
-        statements: 50,
+        // CAP-QUAL-01：覆盖率冲刺后基线（v0.6.0）。
+        // 当前 85.22% stmt / 74.53% branch — 阈值留 5% 缓冲防抖。
+        lines: 80,
+        functions: 80,
+        branches: 70,
+        statements: 80,
       },
     },
   },
