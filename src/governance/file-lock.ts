@@ -17,6 +17,8 @@ export class FileLockManager {
   private readonly writeLocks = new Map<string, WriteLockRecord>();
   private readonly readLocks = new Map<string, ReadLockRecord>();
   private readonly timeoutMs: number;
+  /** T-78: 上次 expireStaleLocks 清理的锁数量（read + write 合计） */
+  private lastExpiredCount = 0;
 
   constructor(timeoutMs: number = DEFAULT_LOCK_TIMEOUT_MS) {
     this.timeoutMs = timeoutMs;
@@ -109,17 +111,26 @@ export class FileLockManager {
     return this.readLocks.get(filePath)?.locks.size ?? 0;
   }
 
+  /** T-78: 上次 expireStaleLocks 清理掉的锁数量（read + write） */
+  getLastExpiredCount(): number {
+    return this.lastExpiredCount;
+  }
+
   private expireStaleLocks(): void {
     const now = Date.now();
+    let expired = 0;
     for (const [path, record] of this.writeLocks) {
       if (new Date(record.lock.expiresAt).getTime() < now) {
         this.writeLocks.delete(path);
+        expired += 1;
       }
     }
     for (const [path, record] of this.readLocks) {
       if (record.expiresAt < now) {
         this.readLocks.delete(path);
+        expired += 1;
       }
     }
+    this.lastExpiredCount = expired;
   }
 }

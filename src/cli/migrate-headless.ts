@@ -37,6 +37,7 @@ export interface HeadlessCheckResult {
   readonly exists: boolean;
   readonly hasPlatforms: boolean;
   readonly projectCount: number;
+  readonly schemaVersion: string | undefined;
   readonly issues: ReadonlyArray<string>;
   readonly ok: boolean;
 }
@@ -53,12 +54,20 @@ const PLATFORM_MARKERS = [
   /^\s*type\s*=\s*["']?feishu["']?/m,
 ];
 
+/** T-77: dev-brain 期望的 schema_version */
+const EXPECTED_SCHEMA_VERSION = "1";
+
 function countProjects(content: string): number {
   return (content.match(/\[\[projects\]\]/g) ?? []).length;
 }
 
 function hasPlatformSections(content: string): boolean {
   return PLATFORM_MARKERS.some((re) => re.test(content));
+}
+
+function parseSchemaVersion(content: string): string | undefined {
+  const m = content.match(/^\s*schema_version\s*=\s*"?([^"\s]+)"?\s*$/m);
+  return m?.[1];
 }
 
 export function stripPlatformBlocks(content: string): string {
@@ -102,6 +111,7 @@ export async function checkHeadlessConfig(
       exists: false,
       hasPlatforms: false,
       projectCount: 0,
+      schemaVersion: undefined,
       issues,
       ok: false,
     };
@@ -109,6 +119,7 @@ export async function checkHeadlessConfig(
 
   const hasPlatforms = hasPlatformSections(content);
   const projectCount = countProjects(content);
+  const schemaVersion = parseSchemaVersion(content);
 
   if (hasPlatforms) {
     issues.push(
@@ -123,14 +134,29 @@ export async function checkHeadlessConfig(
       `仅 ${projectCount} 个 project，建议配置 workspace-claude/codex/cursor`,
     );
   }
+  // T-77: schema_version 校验
+  if (schemaVersion === undefined) {
+    issues.push(
+      `缺少 schema_version 字段（dev-brain 期望 "${EXPECTED_SCHEMA_VERSION}"）`,
+    );
+  } else if (schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+    issues.push(
+      `schema_version="${schemaVersion}" 与 dev-brain 期望 "${EXPECTED_SCHEMA_VERSION}" 不一致，可能导致 migrate 应用冲突`,
+    );
+  }
 
   return {
     configPath,
     exists: true,
     hasPlatforms,
     projectCount,
+    schemaVersion,
     issues,
-    ok: exists && !hasPlatforms && projectCount >= 1,
+    ok:
+      exists &&
+      !hasPlatforms &&
+      projectCount >= 1 &&
+      schemaVersion === EXPECTED_SCHEMA_VERSION,
   };
 }
 
@@ -327,6 +353,7 @@ export function formatHeadlessCheckReport(check: HeadlessCheckResult): string {
     `- 存在: ${check.exists ? "yes" : "no"}`,
     `- projects: ${check.projectCount}`,
     `- platforms: ${check.hasPlatforms ? "yes (需迁移)" : "no"}`,
+    `- schema_version: ${check.schemaVersion ?? "(missing)"}`,
     `- 结论: ${check.ok ? "✅ headless 就绪" : "⚠️ 需迁移"}`,
   ];
   if (check.issues.length) {

@@ -1,6 +1,9 @@
 # cc-connect headless 配置示例（Phase 2+）
 # 三个 Worker project 去掉 platforms，由 dev-brain 经 api.sock 调用
 
+# T-77: schema_version — dev-brain migrate-headless 会校验；不匹配时告警
+schema_version = "1"
+
 language = "zh"
 
 [log]
