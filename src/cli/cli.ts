@@ -7,7 +7,7 @@ import {
   LarkCliFeishuReporter,
 } from "../gateway/feishu-reporter.js";
 import { runFeishuEventLoop } from "../gateway/feishu-gateway.js";
-import { loadConfig } from "../config/env.js";
+import { loadConfig, detectPlaceholders } from "../config/env.js";
 import { formatDoctorReport, runDoctorChecks } from "./doctor.js";
 import { CcConnectClient } from "../adapters/cc-connect-client.js";
 import {
@@ -30,8 +30,18 @@ program
   .command("start")
   .description("启动飞书 Gateway（订阅 lark-cli event）")
   .option("--dry-run", "仅打印配置，不订阅事件")
-  .action(async (opts: { dryRun?: boolean }) => {
+  .option("--strict", "占位值检测命中则退出码 2")
+  .action(async (opts: { dryRun?: boolean; strict?: boolean }) => {
     const config = loadConfig();
+    const placeholders = detectPlaceholders(config);
+    if (placeholders.length > 0) {
+      for (const field of placeholders) {
+        process.stderr.write(`[WARN] ${field} looks like a placeholder\n`);
+      }
+      if (opts.strict) {
+        process.exit(2);
+      }
+    }
     if (opts.dryRun) {
       process.stdout.write(
         [

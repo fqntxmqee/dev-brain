@@ -1,6 +1,36 @@
-import { copyFile, readFile, rename, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const MAX_BACKUPS = 5; // T-44
+
+async function rotateBackups(
+  sourcePath: string,
+  keep: number = MAX_BACKUPS,
+): Promise<void> {
+  const dir = dirname(sourcePath);
+  const base = sourcePath.split("/").pop() ?? "config.toml";
+  const prefix = `${base}.bak.`;
+  const entries = await readdir(dir);
+  const matches = entries
+    .filter((e) => e.startsWith(prefix))
+    .map((e) => ({
+      name: e,
+      ts: Number.parseInt(e.slice(prefix.length), 10) || 0,
+    }))
+    .sort((a, b) => b.ts - a.ts);
+  for (const stale of matches.slice(keep)) {
+    await unlink(join(dir, stale.name)).catch(() => undefined);
+  }
+}
 
 export interface HeadlessCheckResult {
   readonly configPath: string;
@@ -227,6 +257,7 @@ export async function applyHeadlessConfig(options: {
   //   2. writeFile(.tmp.new) → rename(.tmp.new, real)
   //   3. 任一步失败清理 .tmp.new，保留 .bak.<ts>
   await copyFile(options.sourcePath, backupPath);
+  await rotateBackups(options.sourcePath);
   const tmpNew = `${options.sourcePath}.tmp.new`;
   try {
     await writeFile(tmpNew, content, "utf8");

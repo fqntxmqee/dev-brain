@@ -135,3 +135,37 @@ export function isSenderAllowed(
   }
   return config.allowFrom.has(senderOpenId);
 }
+
+/**
+ * 占位值检测（CAP-CONF-02 / T-71）。
+ * 命中 `cli_xxx` / `xxx` / `your_*` / `replace_me` 等典型占位 pattern 时返 true。
+ * 仅 stderr WARN，启动不阻断（保留 stub 模式调试）。
+ */
+const PLACEHOLDER_PATTERNS: ReadonlyArray<RegExp> = [
+  /^cli_x{3,}/i,
+  /^(your|placeholder|replace[_-]?me|todo|fixme)[_-].*$/i,
+  /^x{3,}$/i,
+  /^(change|fill)[_-]?me$/i,
+  /^example[-_]?(key|secret|token)/i,
+];
+
+export function looksLikePlaceholder(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  if (v.length < 3) return false;
+  return PLACEHOLDER_PATTERNS.some((re) => re.test(v));
+}
+
+/** 启动期占位检查，返所有命中的字段名（不阻断） */
+export function detectPlaceholders(
+  config: DevBrainConfig,
+): ReadonlyArray<string> {
+  const hits: string[] = [];
+  if (config.feishuAppId && looksLikePlaceholder(config.feishuAppId))
+    hits.push("DEV_BRAIN_FEISHU_APP_ID");
+  if (config.feishuAppSecret && looksLikePlaceholder(config.feishuAppSecret))
+    hits.push("DEV_BRAIN_FEISHU_APP_SECRET");
+  if (config.cursorApiKey && looksLikePlaceholder(config.cursorApiKey))
+    hits.push("CURSOR_API_KEY");
+  return hits;
+}
