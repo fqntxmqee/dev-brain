@@ -102,36 +102,68 @@ export function parseFeishuMessageEvent(
   line: string,
 ): FeishuInboundMessage | undefined {
   try {
-    const event = JSON.parse(line) as {
-      event_type?: string;
-      message?: {
-        message_id?: string;
-        chat_id?: string;
-        content?: string;
-      };
-      sender?: {
-        sender_id?: { open_id?: string };
-        name?: string;
-      };
-    };
+    const event = JSON.parse(line) as Record<string, unknown>;
 
-    if (event.event_type !== "im.message.receive_v1") {
+    // 同时支持两种 schema：
+    //   1) lark-cli event +subscribe --compact 扁平格式：
+    //      {type, chat_id, message_id, content, sender_id, message_type, ...}
+    //   2) 飞书 WebSocket 嵌套格式（v0.7.0 之前用）：
+    //      {event_type, message: {message_id, chat_id, content}, sender: {sender_id: {open_id}, name}}
+    const eventType = readString(event.type) ?? readString(event.event_type);
+    if (eventType !== "im.message.receive_v1") {
       return undefined;
     }
 
-    const contentRaw = event.message?.content ?? "{}";
-    const parsed = JSON.parse(contentRaw) as { text?: string };
-    const text = parsed.text?.trim() ?? "";
-    if (!text || !event.message?.chat_id || !event.message.message_id) {
+    // 提取 message 容器（嵌套格式）或直接使用顶层（扁平格式）
+    const message =
+      (event.message as Record<string, unknown> | undefined) ?? event;
+
+    const messageId = readString(message.message_id) ?? readString(message.id);
+    const chatId = readString(message.chat_id);
+
+    // content 在两种格式下意义不同：
+    //   扁平：纯文本
+    //   嵌套：JSON 字符串 e.g. `{"text":"..."}`
+    const rawContent = readString(message.content) ?? "";
+    let text: string | undefined;
+    if (rawContent.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(rawContent) as { text?: string };
+        text = readString(parsed.text);
+      } catch {
+        // fall through: treat as plain text
+        text = rawContent;
+      }
+    } else {
+      text = rawContent;
+    }
+    text = text?.trim();
+    if (!text || !chatId || !messageId) {
+      return undefined;
+    }
+
+    // sender_id：扁平格式直接是 open_id；嵌套格式是 {open_id, ...}
+    const senderField = (event.sender ?? {}) as Record<string, unknown>;
+    const senderIdField = (senderField.sender_id ?? event.sender_id) as
+      | string
+      | Record<string, unknown>
+      | undefined;
+    let senderOpenId: string | undefined;
+    if (typeof senderIdField === "string") {
+      senderOpenId = readString(senderIdField);
+    } else if (senderIdField && typeof senderIdField === "object") {
+      senderOpenId = readString(
+        (senderIdField as Record<string, unknown>).open_id,
+      );
+    }
+    if (!senderOpenId) {
       return undefined;
     }
 
     // 校验关键字段：open_id / chat_id / message_id 拒绝畸形值
-    const openIdResult = OpenIdSchema.safeParse(
-      event.sender?.sender_id?.open_id ?? "",
-    );
-    const chatIdResult = ChatIdSchema.safeParse(event.message.chat_id);
-    const msgIdResult = MessageIdSchema.safeParse(event.message.message_id);
+    const openIdResult = OpenIdSchema.safeParse(senderOpenId);
+    const chatIdResult = ChatIdSchema.safeParse(chatId);
+    const msgIdResult = MessageIdSchema.safeParse(messageId);
     if (
       !openIdResult.success ||
       !chatIdResult.success ||
@@ -140,11 +172,18 @@ export function parseFeishuMessageEvent(
       return undefined;
     }
 
+    const senderName =
+      readString(senderField.name) ??
+      (typeof senderIdField === "object" && senderIdField
+        ? readString((senderIdField as Record<string, unknown>).name)
+        : undefined) ??
+      "user";
+
     return {
       messageId: msgIdResult.data,
       chatId: chatIdResult.data,
       senderOpenId: openIdResult.data,
-      senderName: event.sender?.name ?? "user",
+      senderName,
       text,
     };
   } catch {

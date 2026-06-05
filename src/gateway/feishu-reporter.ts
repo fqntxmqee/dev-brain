@@ -73,30 +73,42 @@ export class InMemoryFeishuReporter implements FeishuReporter {
 async function spawnLarkCli(args: ReadonlyArray<string>): Promise<void> {
   const { spawn } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("lark-cli", args, { stdio: "ignore" });
+    const child = spawn("lark-cli", args, {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`lark-cli exited with code ${code}`));
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const tail = stderr.trim().split("\n").slice(-5).join(" | ");
+      reject(
+        new Error(
+          `lark-cli exited with code ${code}: ${tail || "(no stderr)"}`,
+        ),
+      );
     });
   });
 }
 
 /** Phase 2+: 通过 lark-cli im 发送消息 */
 export class LarkCliFeishuReporter implements FeishuReporter {
-  constructor(
-    private readonly receiveIdType: "chat_id" | "open_id" = "chat_id",
-  ) {}
+  constructor(private readonly profile: string = "dev-brain") {}
 
   async sendText(reply: FeishuReply): Promise<void> {
     assertReplyTextWithinLimit(reply.text);
     await spawnLarkCli([
       "im",
       "+messages-send",
-      "--receive-id",
+      "--profile",
+      this.profile,
+      "--chat-id",
       reply.chatId,
-      "--receive-id-type",
-      this.receiveIdType,
       "--msg-type",
       "text",
       "--content",
@@ -108,10 +120,10 @@ export class LarkCliFeishuReporter implements FeishuReporter {
     await spawnLarkCli([
       "im",
       "+messages-send",
-      "--receive-id",
+      "--profile",
+      this.profile,
+      "--chat-id",
       reply.chatId,
-      "--receive-id-type",
-      this.receiveIdType,
       "--msg-type",
       "interactive",
       "--content",
@@ -124,6 +136,8 @@ export class LarkCliFeishuReporter implements FeishuReporter {
     await spawnLarkCli([
       "im",
       "+messages-update",
+      "--profile",
+      this.profile,
       "--message-id",
       update.messageId,
       "--content",

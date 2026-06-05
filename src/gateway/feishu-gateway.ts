@@ -268,7 +268,7 @@ export async function runFeishuEventLoop(
 
   const child = spawn(
     "lark-cli",
-    ["event", "+subscribe", "--format", "compact"],
+    ["event", "+subscribe", "--compact", "--profile", "dev-brain"],
     {
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -278,14 +278,32 @@ export async function runFeishuEventLoop(
     throw new Error("lark-cli event stdout unavailable");
   }
 
+  // lark-cli 启动错误 / 立即 exit 必须捕获，否则 daemon 静默挂掉
+  child.on("error", (err) => {
+    process.stderr.write(`lark-cli spawn error: ${err.message}\n`);
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    process.stderr.write(`lark-cli stderr: ${chunk.toString("utf8")}\n`);
+  });
+  child.on("close", (code) => {
+    process.stderr.write(`lark-cli exited with code ${code}\n`);
+  });
+
   const rl = createInterface({ input: child.stdout });
 
   rl.on("line", (line) => {
     onLine(line);
     const event = parseFeishuInboundEvent(line);
-    if (!event) return;
+    if (!event) {
+      // 调试: 解析失败的原始行（打印完整结构便于诊断 format 不匹配）
+      process.stderr.write(`gateway: unparsed line (full): ${line}\n`);
+      return;
+    }
 
     if (event.kind === "message") {
+      process.stderr.write(
+        `gateway: message from ${event.message.senderOpenId}: ${event.message.text.slice(0, 80)}\n`,
+      );
       void gateway.handleMessage(event.message).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`gateway error: ${msg}\n`);
