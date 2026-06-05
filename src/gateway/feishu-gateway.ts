@@ -20,6 +20,7 @@ import { parseIntent } from "./intent-parser.js";
 import { HELP_TEXT } from "./intent-parser.js";
 import type { FeishuReporter } from "./feishu-reporter.js";
 import { formatInboundLog, supportsCards } from "./feishu-reporter.js";
+import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
 
 export interface FeishuGatewayDeps {
   readonly config: DevBrainConfig;
@@ -160,6 +161,8 @@ export class FeishuGateway {
         const plan = this.deps.brain.createPlan(message);
         replyText = plan.summary;
         planForCard = plan;
+        // T-69: card 渲染时附带 DAG 视图（tier 分层）— 后续可注入 buildPlanCard
+        void computeExecutionTiers(plan.subTasks);
         break;
       }
     }

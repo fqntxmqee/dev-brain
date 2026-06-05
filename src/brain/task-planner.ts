@@ -211,6 +211,28 @@ export function formatPlanSummary(
   ].join("\n");
 }
 
+/** T-69: DAG 可视化（按 tier 分层） */
+export function formatPlanDag(
+  description: string,
+  _subTasks: ReadonlyArray<PlannedSubTask>,
+  tiers: ReadonlyArray<ReadonlyArray<PlannedSubTask>>,
+): string {
+  const header = `🗺 DAG 视图`;
+  const desc = `需求：${description.slice(0, MAX_DESC_LEN)}`;
+  const layerLines = tiers.map((tier, idx) => {
+    const items = tier
+      .map(
+        (st) =>
+          `  • ${st.id} [${st.runtime}] ${st.description.slice(0, MAX_SUBTASK_TITLE_LEN)}`,
+      )
+      .join("\n");
+    return `Layer ${idx + 1}（${tier.length} 并行）：\n${items}`;
+  });
+  return [header, desc, ``, ...layerLines, ``, `↳ 回复 /approve 开始执行`].join(
+    "\n",
+  );
+}
+
 export function newTaskId(): string {
   return uuid();
 }
