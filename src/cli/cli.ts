@@ -49,6 +49,19 @@ program
 
     const reporter = new LarkCliFeishuReporter("chat_id");
     const app = createDevBrainApp(reporter);
+
+    // 启动前预检：必过项（feishu 凭证 / cc-connect 套接字）失败立即退出 2
+    const checks = await runDoctorChecks(config);
+    const fatal = checks.filter((c) => !c.ok && c.name !== "cursor_api_key");
+    if (fatal.length > 0) {
+      process.stderr.write(`${formatDoctorReport(checks)}\n`);
+      process.stderr.write(
+        "\n❌ 预检未通过：上述 ❌ 项需先修复。运行 `dev-brain doctor` 查看详情。\n",
+      );
+      process.exit(2);
+    }
+    process.stdout.write(`${formatDoctorReport(checks)}\n\n`);
+
     process.stdout.write("🧠 Dev Brain 已启动，等待飞书消息…\n");
     await runFeishuEventLoop(app.gateway, (line) => {
       if (process.env.DEV_BRAIN_DEBUG === "1") {
