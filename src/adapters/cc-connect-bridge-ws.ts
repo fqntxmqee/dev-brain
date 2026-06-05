@@ -28,8 +28,20 @@ function parseFrame(data: Buffer): string | undefined {
     payloadLen = Number(data.readBigUInt64BE(2));
     offset = 10;
   }
-  if (masked) offset += 4;
-  return data.subarray(offset, offset + payloadLen).toString("utf8");
+  let maskKey: Buffer | undefined;
+  if (masked) {
+    maskKey = data.subarray(offset, offset + 4);
+    offset += 4;
+  }
+  const payload = data.subarray(offset, offset + payloadLen);
+  if (maskKey) {
+    const unmasked = Buffer.alloc(payload.length);
+    for (let i = 0; i < payload.length; i += 1) {
+      unmasked[i] = payload[i]! ^ maskKey[i % 4]!;
+    }
+    return unmasked.toString("utf8");
+  }
+  return payload.toString("utf8");
 }
 
 /**
