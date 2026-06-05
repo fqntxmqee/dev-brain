@@ -1,4 +1,4 @@
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -229,7 +229,47 @@ export async function applyHeadlessConfig(options: {
     configPath: options.sourcePath,
     backupPath,
     applied: true,
-    message: `已应用 headless 配置。备份：${backupPath}。请重启 cc-connect daemon。`,
+    message: `已应用 headless 配置。备份：${backupPath}。请重启 cc-connect daemon。\n回滚：pnpm cli -- migrate-headless --undo ${backupPath}`,
+  };
+}
+
+export interface HeadlessUndoResult {
+  readonly configPath: string;
+  readonly backupPath: string;
+  readonly restored: boolean;
+  readonly message: string;
+}
+
+/**
+ * 把 backup 文件内容原子回滚到 sourcePath（T-35 / CAP-CLI-03）。
+ * 写入流程：writeFile(.tmp.new) → rename(.tmp.new, sourcePath)
+ * 备份文件不存在则返 1。
+ */
+export async function undoHeadlessConfig(options: {
+  readonly backupPath: string;
+  readonly targetPath: string;
+}): Promise<HeadlessUndoResult> {
+  try {
+    await stat(options.backupPath);
+  } catch {
+    return {
+      configPath: options.targetPath,
+      backupPath: options.backupPath,
+      restored: false,
+      message: `备份不存在：${options.backupPath}`,
+    };
+  }
+
+  const content = await readFile(options.backupPath, "utf8");
+  const tmp = `${options.targetPath}.tmp.new`;
+  await writeFile(tmp, content, "utf8");
+  await rename(tmp, options.targetPath);
+
+  return {
+    configPath: options.targetPath,
+    backupPath: options.backupPath,
+    restored: true,
+    message: `Restored config from ${options.backupPath}`,
   };
 }
 

@@ -97,7 +97,6 @@ describe("live integration scenarios", () => {
 
   it("CAP-INT-05: 鉴权 fail-closed 默认 + 显式 allowlist 双向", () => {
     const closedConfig = loadConfig({});
-    delete (closedConfig.allowFrom as Set<string>);
     // 直接构造空集合模拟
     const c1 = { ...closedConfig, allowFrom: new Set<string>() };
     expect(isSenderAllowed(c1, "ou_whoever")).toBe(false);
