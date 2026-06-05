@@ -38,6 +38,16 @@ export class BrainEngine {
   private readonly pendingByChat = new Map<string, BrainTaskPlan>();
   private readonly completed: BrainTaskResult[] = [];
   private activeCount = 0;
+  /** 正在执行的任务（T-50）：记录 taskId/chatId/进度便于 /progress 查询 */
+  private readonly activeTasks = new Map<
+    string,
+    {
+      taskId: string;
+      chatId: string;
+      description: string;
+      subTasks: ReadonlyArray<SubTaskProgress>;
+    }
+  >();
   private readonly fileLocks: FileLockManager;
 
   constructor(private readonly deps: BrainEngineDeps) {
@@ -92,6 +102,21 @@ export class BrainEngine {
     this.pendingByChat.delete(chatId);
     this.activeCount += 1;
 
+    const subTaskOutputs: Array<BrainTaskResult["subTaskOutputs"][number]> = [];
+    const progressState = new Map<string, SubTaskProgress>(
+      plan.subTasks.map((st) => [
+        st.id,
+        { id: st.id, runtime: st.runtime, status: "pending" },
+      ]),
+    );
+
+    this.activeTasks.set(plan.taskId, {
+      taskId: plan.taskId,
+      chatId: plan.chatId,
+      description: plan.description,
+      subTasks: [...progressState.values()],
+    });
+
     const task = this.deps.orchestrator.createTask(
       plan.description,
       plan.taskId,
@@ -101,14 +126,6 @@ export class BrainEngine {
       plan.subTasks.map((st) => ({ id: st.id, description: st.description })),
     );
     this.deps.orchestrator.beginExecution(task.id);
-
-    const subTaskOutputs: Array<BrainTaskResult["subTaskOutputs"][number]> = [];
-    const progressState = new Map<string, SubTaskProgress>(
-      plan.subTasks.map((st) => [
-        st.id,
-        { id: st.id, runtime: st.runtime, status: "pending" },
-      ]),
-    );
 
     const emitProgress = async (): Promise<void> => {
       if (!onProgress) return;
@@ -177,6 +194,7 @@ export class BrainEngine {
       return result;
     } finally {
       this.activeCount = Math.max(0, this.activeCount - 1);
+      this.activeTasks.delete(plan.taskId);
     }
   }
 
@@ -194,12 +212,23 @@ export class BrainEngine {
       status: SubTaskProgress["status"],
       detail?: string,
     ): Promise<void> => {
-      progressState.set(subTask.id, {
+      const entry: SubTaskProgress = {
         id: subTask.id,
         runtime: subTask.runtime,
         status,
         ...(detail !== undefined ? { detail } : {}),
-      });
+      };
+      progressState.set(subTask.id, entry);
+      // 同步更新活跃任务快照（T-50：/progress 子命令可查）
+      const active = this.activeTasks.get(plan.taskId);
+      if (active) {
+        this.activeTasks.set(plan.taskId, {
+          ...active,
+          subTasks: active.subTasks.map((s) =>
+            s.id === subTask.id ? entry : s,
+          ),
+        });
+      }
       await emitProgress();
     };
 
@@ -303,6 +332,21 @@ export class BrainEngine {
     };
   }
 
+  /** 列出正在执行的任务进度（T-50：/progress 子命令可查） */
+  getActiveProgress(): ReadonlyArray<{
+    readonly taskId: string;
+    readonly chatId: string;
+    readonly description: string;
+    readonly subTasks: ReadonlyArray<SubTaskProgress>;
+  }> {
+    return [...this.activeTasks.values()].map((t) => ({
+      taskId: t.taskId,
+      chatId: t.chatId,
+      description: t.description,
+      subTasks: [...t.subTasks],
+    }));
+  }
+
   /** 列出最近 N 条已完成任务（CLI list 子命令 / T-67） */
   listRecent(limit: number = 10): ReadonlyArray<BrainTaskResult> {
     return this.completed.slice(-limit).reverse();
@@ -318,14 +362,48 @@ export class BrainEngine {
   formatStatusText(): string {
     const s = this.getStatus();
     const locked = [...this.fileLocks.getLockedFilePaths()];
-    return [
+    const lines = [
       "🧠 Dev Brain 状态",
       `- 待审批：${s.pendingApprovals}`,
       `- 执行中：${s.activeTasks}`,
       `- 已完成：${s.completedTasks}`,
       `- 可用 Runtime：${this.deps.adapters.list().join(", ")}`,
       `- 文件锁：${locked.length ? locked.join(", ") : "(none)"}`,
-    ].join("\n");
+    ];
+    const active = this.getActiveProgress();
+    if (active.length > 0) {
+      lines.push("", "— 正在执行 —");
+      for (const t of active) {
+        const short = shortTaskId(t.taskId);
+        const done = t.subTasks.filter((s) => s.status === "completed").length;
+        const total = t.subTasks.length;
+        const statusLine = t.subTasks
+          .map((s) => `${s.id}:${statusEmoji(s.status)}`)
+          .join(" ");
+        lines.push(
+          `#${short}  (${done}/${total})  ${t.description.slice(0, MAX_DESC_LEN)}`,
+          `   ${statusLine}`,
+        );
+      }
+    }
+    return lines.join("\n");
+  }
+}
+
+function statusEmoji(status: SubTaskProgress["status"]): string {
+  switch (status) {
+    case "pending":
+      return "⏳";
+    case "assigned":
+      return "📨";
+    case "executing":
+      return "🔧";
+    case "completed":
+      return "✅";
+    case "failed":
+      return "❌";
+    case "blocked":
+      return "⛔";
   }
 }
 

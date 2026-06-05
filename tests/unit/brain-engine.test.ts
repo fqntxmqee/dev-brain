@@ -42,4 +42,18 @@ describe("BrainEngine via gateway", () => {
       }
     }
   });
+
+  it("T-50: getActiveProgress empty when no task in flight", () => {
+    const reporter = new InMemoryFeishuReporter();
+    process.env.DEV_BRAIN_ALLOW_FROM = "ou_test";
+    try {
+      const app = createDevBrainApp(reporter);
+      expect(app.brain.getActiveProgress()).toEqual([]);
+      const text = app.brain.formatStatusText();
+      expect(text).toContain("Dev Brain 状态");
+      expect(text).not.toContain("— 正在执行 —");
+    } finally {
+      delete process.env.DEV_BRAIN_ALLOW_FROM;
+    }
+  });
 });

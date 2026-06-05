@@ -83,9 +83,12 @@ program
 
 program
   .command("plan")
-  .description("本地模拟：输入需求 → 计划 → 批准 → 执行")
+  .description(
+    "本地模拟：输入需求 → 计划 → 批准 → 执行（--no-execute 跳过 /approve 步骤）",
+  )
   .argument("<description>", "任务描述")
-  .action(async (description: string) => {
+  .option("--no-execute", "只生成计划不执行（测试 /approve 之前的链路）")
+  .action(async (description: string, opts: { execute: boolean }) => {
     const reporter = new InMemoryFeishuReporter();
     const app = createDevBrainApp(reporter);
 
@@ -98,7 +101,11 @@ program
       text: description,
     });
 
-    process.stdout.write(`${reporter.sent.at(-1)?.text ?? ""}\n\n`);
+    process.stdout.write(`[text]   ${reporter.sent.at(-1)?.text ?? ""}\n\n`);
+
+    if (!opts.execute) {
+      return;
+    }
 
     await app.gateway.handleMessage({
       messageId: "m2",
@@ -108,7 +115,7 @@ program
       text: "/approve",
     });
 
-    process.stdout.write(`${reporter.sent.at(-1)?.text ?? ""}\n`);
+    process.stdout.write(`[approve] ${reporter.sent.at(-1)?.text ?? ""}\n`);
   });
 
 program
@@ -258,6 +265,82 @@ program
       process.exit(result.written || opts.dryRun ? 0 : 1);
     },
   );
+
+/**
+ * 退出码矩阵（CAP-CLI-13 / T-75）：
+ *   0  成功 / 已是目标状态 / dry-run
+ *   1  运行时错误 / 检查项不通过 / 写入失败
+ *   2  预检未通过（start 必过项）
+ */
+program
+  .command("help-exit-codes")
+  .description("打印 6 个子命令的退出码矩阵（无副作用）")
+  .action(() => {
+    const matrix: ReadonlyArray<{
+      command: string;
+      readonly 0: string;
+      readonly 1: string;
+      readonly 2: string;
+    }> = [
+      {
+        command: "start",
+        "0": "成功进入事件循环（罕见：会一直运行）",
+        "1": "未捕获异常（不期望出现）",
+        "2": "预检未通过（feishu/cc-connect 必过项）",
+      },
+      {
+        command: "doctor",
+        "0": "全部检查通过 / 仅 cursor_api_key 缺失",
+        "1": "feishu/cc-connect/cursor 必过项中至少 1 项失败",
+        "2": "（无）",
+      },
+      {
+        command: "probe",
+        "0": "cc-connect 返回 ok 且有 output",
+        "1": "cc-connect 调用失败 / HTTP 非 200",
+        "2": "（无）",
+      },
+      {
+        command: "migrate-headless --check",
+        "0": "已是 headless 状态",
+        "1": "存在 platforms 或 project 不足",
+        "2": "（无）",
+      },
+      {
+        command: "migrate-headless (default/--apply/--undo)",
+        "0": "写入成功 / 已是目标 / dry-run / 备份不存在（undo 已处理）",
+        "1": "写入失败 / undo 源备份缺失",
+        "2": "（无）",
+      },
+      {
+        command: "show / list / status / plan",
+        "0": "成功渲染",
+        "1": "任务不存在 / 解析失败",
+        "2": "（无）",
+      },
+    ];
+
+    const lines = [
+      "📖 dev-brain 退出码矩阵（CAP-CLI-13 / T-75）",
+      "",
+      "全命令共用的 3 档退出码：",
+      "  0  成功 / 已是目标状态 / dry-run",
+      "  1  运行时错误 / 检查项不通过 / 写入失败",
+      "  2  预检未通过（仅 start 必过项使用）",
+      "",
+      "—  按子命令 —",
+      ...matrix.flatMap((row) => [
+        `▸ ${row.command}`,
+        `    0  ${row["0"]}`,
+        `    1  ${row["1"]}`,
+        `    2  ${row["2"]}`,
+        "",
+      ]),
+      "使用建议：CI 中如需在 doctor 失败时阻断，请用 `doctor || exit 1`；",
+      "start 阻塞请用 `start || exit 2`（脚本/编排层判定）。",
+    ];
+    process.stdout.write(`${lines.join("\n")}\n`);
+  });
 
 // 退出码契约（运维/CI 可依赖）：
 //   0  成功 / 已是目标状态 / dry-run
