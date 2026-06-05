@@ -1,5 +1,6 @@
 import type { DevBrainConfig } from "../config/env.js";
 import { AdapterRegistry, collectAdapterOutput } from "../adapters/index.js";
+import type { CcConnectClient } from "../adapters/cc-connect-client.js";
 import type {
   BrainStatusSnapshot,
   BrainTaskPlan,
@@ -347,8 +348,11 @@ function formatExecutionSummary(
   ].join("\n");
 }
 
-export function createBrainEngine(config: DevBrainConfig): BrainEngine {
-  const adapters = new AdapterRegistry(config);
+export function createBrainEngine(
+  config: DevBrainConfig,
+  client?: CcConnectClient,
+): BrainEngine {
+  const adapters = new AdapterRegistry(config, client);
   const orchestrator = new TaskOrchestrator();
   return new BrainEngine({ config, adapters, orchestrator });
 }
