@@ -1,5 +1,5 @@
-import type { DevBrainConfig } from '../config/env.js';
-import { AdapterRegistry, collectAdapterOutput } from '../adapters/index.js';
+import type { DevBrainConfig } from "../config/env.js";
+import { AdapterRegistry, collectAdapterOutput } from "../adapters/index.js";
 import type {
   BrainStatusSnapshot,
   BrainTaskPlan,
@@ -8,12 +8,16 @@ import type {
   FeishuInboundMessage,
   PlannedSubTask,
   SubTaskProgress,
-} from '../core/types.js';
-import { FileLockManager, LockConflictError } from '../governance/index.js';
-import type { FileLock } from '../governance/types.js';
-import { computeExecutionTiers } from '../orchestrator/dag-scheduler.js';
-import { TaskOrchestrator } from '../orchestrator/index.js';
-import { buildDefaultSubTasks, formatPlanSummary, newTaskId } from './task-planner.js';
+} from "../core/types.js";
+import { FileLockManager, LockConflictError } from "../governance/index.js";
+import type { FileLock } from "../governance/types.js";
+import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
+import { TaskOrchestrator } from "../orchestrator/index.js";
+import {
+  buildDefaultSubTasks,
+  formatPlanSummary,
+  newTaskId,
+} from "./task-planner.js";
 
 export interface BrainEngineDeps {
   readonly config: DevBrainConfig;
@@ -22,7 +26,9 @@ export interface BrainEngineDeps {
   readonly fileLocks?: FileLockManager;
 }
 
-export type ProgressCallback = (progress: ExecutionProgress) => void | Promise<void>;
+export type ProgressCallback = (
+  progress: ExecutionProgress,
+) => void | Promise<void>;
 
 export class BrainEngine {
   private readonly pendingByChat = new Map<string, BrainTaskPlan>();
@@ -42,7 +48,7 @@ export class BrainEngine {
       chatId: message.chatId,
       description: message.text.trim(),
       subTasks,
-      phase: 'awaiting_approval',
+      phase: "awaiting_approval",
       createdAt: new Date().toISOString(),
       summary: formatPlanSummary(message.text.trim(), subTasks),
     };
@@ -66,30 +72,37 @@ export class BrainEngine {
     return true;
   }
 
-  async approveAndExecute(chatId: string, onProgress?: ProgressCallback, expectedTaskId?: string): Promise<BrainTaskResult> {
+  async approveAndExecute(
+    chatId: string,
+    onProgress?: ProgressCallback,
+    expectedTaskId?: string,
+  ): Promise<BrainTaskResult> {
     const plan = this.pendingByChat.get(chatId);
     if (!plan) {
-      throw new Error('当前会话没有待审批的任务，请先发送需求描述。');
+      throw new Error("当前会话没有待审批的任务，请先发送需求描述。");
     }
     if (expectedTaskId && plan.taskId !== expectedTaskId) {
-      throw new Error('任务 ID 不匹配，请重新创建计划。');
+      throw new Error("任务 ID 不匹配，请重新创建计划。");
     }
 
     this.pendingByChat.delete(chatId);
     this.activeCount += 1;
 
-    const task = this.deps.orchestrator.createTask(plan.description, plan.taskId);
+    const task = this.deps.orchestrator.createTask(
+      plan.description,
+      plan.taskId,
+    );
     this.deps.orchestrator.planTask(
       task.id,
       plan.subTasks.map((st) => ({ id: st.id, description: st.description })),
     );
     this.deps.orchestrator.beginExecution(task.id);
 
-    const subTaskOutputs: BrainTaskResult['subTaskOutputs'] = [];
+    const subTaskOutputs: Array<BrainTaskResult["subTaskOutputs"][number]> = [];
     const progressState = new Map<string, SubTaskProgress>(
       plan.subTasks.map((st) => [
         st.id,
-        { id: st.id, runtime: st.runtime, status: 'pending' },
+        { id: st.id, runtime: st.runtime, status: "pending" },
       ]),
     );
 
@@ -110,13 +123,21 @@ export class BrainEngine {
       for (const tier of tiers) {
         const tierResults = await Promise.all(
           tier.map((subTask) =>
-            this.executeSubTask(plan, task.id, subTask, progressState, emitProgress),
+            this.executeSubTask(
+              plan,
+              task.id,
+              subTask,
+              progressState,
+              emitProgress,
+            ),
           ),
         );
         subTaskOutputs.push(...tierResults.filter((r) => r !== undefined));
       }
 
-      const hasFailure = [...progressState.values()].some((st) => st.status === 'failed' || st.status === 'blocked');
+      const hasFailure = [...progressState.values()].some(
+        (st) => st.status === "failed" || st.status === "blocked",
+      );
       if (hasFailure) {
         this.deps.orchestrator.failTask(task.id);
         const result: BrainTaskResult = {
@@ -161,12 +182,12 @@ export class BrainEngine {
     subTask: PlannedSubTask,
     progressState: Map<string, SubTaskProgress>,
     emitProgress: () => Promise<void>,
-  ): Promise<BrainTaskResult['subTaskOutputs'][number] | undefined> {
+  ): Promise<BrainTaskResult["subTaskOutputs"][number] | undefined> {
     const agentId = `adapter:${subTask.runtime}:${subTask.id}`;
     const acquiredLocks: FileLock[] = [];
 
     const setStatus = async (
-      status: SubTaskProgress['status'],
+      status: SubTaskProgress["status"],
       detail?: string,
     ): Promise<void> => {
       progressState.set(subTask.id, {
@@ -180,18 +201,26 @@ export class BrainEngine {
 
     try {
       for (const filePath of subTask.requiredFiles) {
-        if (subTask.lockMode === 'none') continue;
+        if (subTask.lockMode === "none") continue;
         acquiredLocks.push(
           this.fileLocks.acquire(agentId, filePath, subTask.lockMode),
         );
       }
     } catch (error) {
       if (error instanceof LockConflictError) {
-        await setStatus('blocked', `文件锁冲突：${error.filePath} 被 ${error.holderAgentId} 占用`);
-        this.deps.orchestrator.updateSubTaskStatus(orchestratorTaskId, subTask.id, 'failed', {
-          assignedAgentId: agentId,
-          output: `blocked: ${error.message}`,
-        });
+        await setStatus(
+          "blocked",
+          `文件锁冲突：${error.filePath} 被 ${error.holderAgentId} 占用`,
+        );
+        this.deps.orchestrator.updateSubTaskStatus(
+          orchestratorTaskId,
+          subTask.id,
+          "failed",
+          {
+            assignedAgentId: agentId,
+            output: `blocked: ${error.message}`,
+          },
+        );
         return {
           subTaskId: subTask.id,
           runtime: subTask.runtime,
@@ -202,13 +231,22 @@ export class BrainEngine {
     }
 
     try {
-      await setStatus('assigned');
-      this.deps.orchestrator.updateSubTaskStatus(orchestratorTaskId, subTask.id, 'assigned', {
-        assignedAgentId: agentId,
-      });
+      await setStatus("assigned");
+      this.deps.orchestrator.updateSubTaskStatus(
+        orchestratorTaskId,
+        subTask.id,
+        "assigned",
+        {
+          assignedAgentId: agentId,
+        },
+      );
 
-      await setStatus('executing');
-      this.deps.orchestrator.updateSubTaskStatus(orchestratorTaskId, subTask.id, 'executing');
+      await setStatus("executing");
+      this.deps.orchestrator.updateSubTaskStatus(
+        orchestratorTaskId,
+        subTask.id,
+        "executing",
+      );
 
       const adapter = this.deps.adapters.get(subTask.runtime);
       const output = await collectAdapterOutput(adapter, {
@@ -217,8 +255,13 @@ export class BrainEngine {
         sessionKey: `${plan.taskId}:${subTask.id}`,
       });
 
-      this.deps.orchestrator.updateSubTaskStatus(orchestratorTaskId, subTask.id, 'completed', { output });
-      await setStatus('completed');
+      this.deps.orchestrator.updateSubTaskStatus(
+        orchestratorTaskId,
+        subTask.id,
+        "completed",
+        { output },
+      );
+      await setStatus("completed");
 
       return {
         subTaskId: subTask.id,
@@ -227,10 +270,15 @@ export class BrainEngine {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.deps.orchestrator.updateSubTaskStatus(orchestratorTaskId, subTask.id, 'failed', {
-        output: message,
-      });
-      await setStatus('failed', message);
+      this.deps.orchestrator.updateSubTaskStatus(
+        orchestratorTaskId,
+        subTask.id,
+        "failed",
+        {
+          output: message,
+        },
+      );
+      await setStatus("failed", message);
       return {
         subTaskId: subTask.id,
         runtime: subTask.runtime,
@@ -255,36 +303,42 @@ export class BrainEngine {
     const s = this.getStatus();
     const locked = [...this.fileLocks.getLockedFilePaths()];
     return [
-      '🧠 Dev Brain 状态',
+      "🧠 Dev Brain 状态",
       `- 待审批：${s.pendingApprovals}`,
       `- 执行中：${s.activeTasks}`,
       `- 已完成：${s.completedTasks}`,
-      `- 可用 Runtime：${this.deps.adapters.list().join(', ')}`,
-      `- 文件锁：${locked.length ? locked.join(', ') : '(none)'}`,
-    ].join('\n');
+      `- 可用 Runtime：${this.deps.adapters.list().join(", ")}`,
+      `- 文件锁：${locked.length ? locked.join(", ") : "(none)"}`,
+    ].join("\n");
   }
 }
 
 function formatExecutionSummary(
   plan: BrainTaskPlan,
-  outputs: BrainTaskResult['subTaskOutputs'],
+  outputs: BrainTaskResult["subTaskOutputs"],
   progressState: Map<string, SubTaskProgress>,
 ): string {
-  const blocked = [...progressState.values()].filter((st) => st.status === 'blocked');
+  const blocked = [...progressState.values()].filter(
+    (st) => st.status === "blocked",
+  );
   const lines = outputs.map(
     (o) => `${o.subTaskId} [${o.runtime}]: ${o.output.slice(0, 200)}`,
   );
-  const header = blocked.length > 0 ? '⚠️ 任务部分完成' : '✅ 任务完成';
+  const header = blocked.length > 0 ? "⚠️ 任务部分完成" : "✅ 任务完成";
   return [
     `${header} #${plan.taskId.slice(0, 8)}`,
     ``,
     `需求：${plan.description.slice(0, 160)}`,
     ...(blocked.length
-      ? ['', '文件锁阻止：', ...blocked.map((b) => `- ${b.id}: ${b.detail ?? 'conflict'}`)]
+      ? [
+          "",
+          "文件锁阻止：",
+          ...blocked.map((b) => `- ${b.id}: ${b.detail ?? "conflict"}`),
+        ]
       : []),
     ``,
     ...lines,
-  ].join('\n');
+  ].join("\n");
 }
 
 export function createBrainEngine(config: DevBrainConfig): BrainEngine {
