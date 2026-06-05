@@ -184,9 +184,15 @@ program
         dryRun: opts.dryRun,
       });
       process.stdout.write(`${result.message}\n`);
+      // 退出码：dry-run → 0；非 dry-run 写入失败 → 1
+      process.exit(result.written || opts.dryRun ? 0 : 1);
     },
   );
 
+// 退出码契约（运维/CI 可依赖）：
+//   0  成功 / 已是目标状态 / dry-run
+//   1  运行时错误 / 检查项不通过 / 写入失败
+//   2  预检未通过（start 必过项）
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`Error: ${toErrorMessage(err)}\n`);
   process.exit(1);
