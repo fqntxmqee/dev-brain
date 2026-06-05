@@ -1,5 +1,6 @@
 import type { DevBrainConfig } from "../config/env.js";
 import { isSenderAllowed as checkSender } from "../config/env.js";
+import { MAX_PROMPT_BYTES } from "../core/constants.js";
 import type { BrainEngine } from "../brain/brain-engine.js";
 import type {
   BrainTaskPlan,
@@ -88,6 +89,16 @@ export class FeishuGateway {
 
     if (!checkSender(this.deps.config, message.senderOpenId)) {
       await this.sendText(message, "⛔ 无权限使用 Dev Brain。");
+      return;
+    }
+
+    // T-66: prompt 4KB 上限（UTF-8 字节）
+    const promptBytes = Buffer.byteLength(message.text ?? "", "utf8");
+    if (promptBytes > MAX_PROMPT_BYTES) {
+      await this.sendText(
+        message,
+        `⛔ 消息超过 ${MAX_PROMPT_BYTES} 字节上限（当前 ${promptBytes}）。请精简后重发。`,
+      );
       return;
     }
 

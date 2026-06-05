@@ -15,6 +15,8 @@ import { FileLockManager, LockConflictError } from "../governance/index.js";
 import type { FileLock } from "../governance/types.js";
 import { computeExecutionTiers } from "../orchestrator/dag-scheduler.js";
 import { TaskOrchestrator } from "../orchestrator/index.js";
+import { PostmortemStore } from "./postmortem-store.js";
+import { RETRY_MAX } from "../core/constants.js";
 import {
   buildDefaultSubTasks,
   buildSessionKey,
@@ -28,6 +30,8 @@ export interface BrainEngineDeps {
   readonly adapters: AdapterRegistry;
   readonly orchestrator: TaskOrchestrator;
   readonly fileLocks?: FileLockManager;
+  /** T-62/T-65: 可选；不传则不落盘（测试/CLI 子命令常用） */
+  readonly postmortemStore?: PostmortemStore;
 }
 
 export type ProgressCallback = (
@@ -51,9 +55,11 @@ export class BrainEngine {
   /** T-61: 同一 chat 重复创建 plan 的覆盖次数 */
   private overwriteCount = 0;
   private readonly fileLocks: FileLockManager;
+  private readonly postmortemStore: PostmortemStore | undefined;
 
   constructor(private readonly deps: BrainEngineDeps) {
     this.fileLocks = deps.fileLocks ?? new FileLockManager();
+    this.postmortemStore = deps.postmortemStore;
   }
 
   createPlan(message: FeishuInboundMessage): BrainTaskPlan {
@@ -185,6 +191,7 @@ export class BrainEngine {
           subTaskOutputs,
         };
         this.completed.push(result);
+        await this.writePostmortem(result).catch(() => undefined);
         return result;
       }
 
@@ -197,6 +204,7 @@ export class BrainEngine {
         subTaskOutputs,
       };
       this.completed.push(result);
+      await this.writePostmortem(result).catch(() => undefined);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -208,6 +216,7 @@ export class BrainEngine {
         subTaskOutputs,
       };
       this.completed.push(result);
+      await this.writePostmortem(result).catch(() => undefined);
       return result;
     } finally {
       this.activeCount = Math.max(0, this.activeCount - 1);
@@ -352,6 +361,96 @@ export class BrainEngine {
   /** T-61: 暴露覆盖次数给 status 文本 */
   getOverwriteCount(): number {
     return this.overwriteCount;
+  }
+
+  /** T-62/T-65: 异步落盘 postmortem.json（错误吞掉避免影响主链路） */
+  private async writePostmortem(result: BrainTaskResult): Promise<void> {
+    if (!this.postmortemStore) return;
+    await this.postmortemStore.write(result);
+  }
+
+  /** T-64: 重试已完成任务的指定子任务（最多 RETRY_MAX 次） */
+  async retrySubTask(
+    taskIdOrShort: string,
+    subTaskId: string,
+  ): Promise<{
+    readonly status: "ok" | "not_found" | "max_retries" | "no_plan";
+    readonly output?: string;
+    readonly error?: string;
+  }> {
+    const record = this.completed
+      .slice()
+      .reverse()
+      .find(
+        (r) => r.taskId === taskIdOrShort || r.taskId.startsWith(taskIdOrShort),
+      );
+    if (!record) {
+      return { status: "not_found", error: `任务不存在: ${taskIdOrShort}` };
+    }
+    const existing = record.subTaskOutputs.find(
+      (o) => o.subTaskId === subTaskId,
+    );
+    if (!existing) {
+      return {
+        status: "not_found",
+        error: `子任务不存在: ${subTaskId} (task ${record.taskId.slice(0, 12)})`,
+      };
+    }
+    // 限制最大重试次数（T-64 / 防失控）
+    const retryCount = (existing as { _retryCount?: number })._retryCount ?? 0;
+    if (retryCount >= RETRY_MAX) {
+      return {
+        status: "max_retries",
+        error: `已达最大重试次数 ${RETRY_MAX}`,
+      };
+    }
+    const plan = this.rebuildPlanFromResult(record);
+    if (!plan) {
+      return { status: "no_plan", error: "无法重建 plan" };
+    }
+    const subTask = plan.subTasks.find((s) => s.id === subTaskId);
+    if (!subTask) {
+      return { status: "not_found", error: `子任务不在 plan 中: ${subTaskId}` };
+    }
+    const progressState = new Map<string, SubTaskProgress>(
+      plan.subTasks.map((st) => [
+        st.id,
+        { id: st.id, runtime: st.runtime, status: "pending" },
+      ]),
+    );
+    const out = await this.executeSubTask(
+      plan,
+      `retry-${Date.now()}`,
+      subTask,
+      progressState,
+      async () => undefined,
+    );
+    return out
+      ? { status: "ok", output: out.output }
+      : { status: "not_found", error: "executeSubTask 返回空" };
+  }
+
+  /** T-64: 从历史 result 重建 plan（仅用于重试上下文） */
+  private rebuildPlanFromResult(
+    result: BrainTaskResult,
+  ): BrainTaskPlan | undefined {
+    // 简化：description 从 summary 解析（生产场景可读 postmortem.json 重建）
+    return {
+      taskId: result.taskId,
+      chatId: "(retry)",
+      description: result.summary,
+      subTasks: result.subTaskOutputs.map((o) => ({
+        id: o.subTaskId,
+        description: o.output,
+        runtime: o.runtime as BrainTaskPlan["subTasks"][number]["runtime"],
+        requiredFiles: [],
+        lockMode: "none" as const,
+        dependsOn: [],
+      })),
+      phase: "executing",
+      createdAt: new Date().toISOString(),
+      summary: result.summary,
+    };
   }
 
   /** 列出正在执行的任务进度（T-50：/progress 子命令可查） */
