@@ -1,5 +1,29 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
+
+/** 严格正整数（1ms-1h 区间，防御畸形配置） */
+const TimeoutMsSchema = z
+  .string()
+  .regex(/^\d+$/, "must be non-negative integer string")
+  .transform((s) => Number.parseInt(s, 10))
+  .refine((n) => n >= 0 && n <= 3_600_000, "must be in [0, 3_600_000]ms");
+
+const PollMsSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform((s) => Number.parseInt(s, 10))
+  .refine((n) => n >= 50 && n <= 60_000, "must be in [50, 60_000]ms");
+
+function safeInt(
+  raw: string | undefined,
+  fallback: number,
+  schema: z.ZodType<number>,
+): number {
+  const result = schema.safeParse(raw ?? String(fallback));
+  if (result.success) return result.data;
+  return fallback;
+}
 
 export type AdapterMode = "stub" | "live";
 export type CcSyncMode = "send" | "relay";
@@ -56,9 +80,10 @@ export function loadConfig(
       env.DEV_BRAIN_CC_DATA_DIR?.trim() || join(homedir(), ".cc-connect"),
     ),
     ccSyncMode: env.DEV_BRAIN_CC_SYNC?.trim() === "relay" ? "relay" : "send",
-    ccRelayTimeoutMs: Number.parseInt(
-      env.DEV_BRAIN_CC_RELAY_TIMEOUT_MS?.trim() ?? "300000",
-      10,
+    ccRelayTimeoutMs: safeInt(
+      env.DEV_BRAIN_CC_RELAY_TIMEOUT_MS?.trim(),
+      300000,
+      TimeoutMsSchema,
     ),
     ccProjectClaude:
       env.DEV_BRAIN_CC_PROJECT_CLAUDE?.trim() || "workspace-claude",
@@ -79,13 +104,15 @@ export function loadConfig(
         join(homedir(), ".cc-connect/config.toml"),
     ),
     ccBridgeEnabled: env.DEV_BRAIN_CC_BRIDGE?.trim() !== "0",
-    ccBridgePollMs: Number.parseInt(
-      env.DEV_BRAIN_CC_BRIDGE_POLL_MS?.trim() ?? "2000",
-      10,
+    ccBridgePollMs: safeInt(
+      env.DEV_BRAIN_CC_BRIDGE_POLL_MS?.trim(),
+      2000,
+      PollMsSchema,
     ),
-    ccBridgeTimeoutMs: Number.parseInt(
-      env.DEV_BRAIN_CC_BRIDGE_TIMEOUT_MS?.trim() ?? "300000",
-      10,
+    ccBridgeTimeoutMs: safeInt(
+      env.DEV_BRAIN_CC_BRIDGE_TIMEOUT_MS?.trim(),
+      300000,
+      TimeoutMsSchema,
     ),
     ccBridgeReplyPath:
       env.DEV_BRAIN_CC_BRIDGE_REPLY_PATH?.trim() || "/bridge/reply",
