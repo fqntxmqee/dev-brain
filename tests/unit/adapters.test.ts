@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// @cursor/sdk transitively requires sqlite3, whose native binding may be
+// missing in CI (frozen lockfile + ignored build scripts). Mock the SDK
+// module so the live code path can be exercised without touching native code.
+vi.mock("@cursor/sdk", () => ({
+  Agent: {
+    prompt: async () => ({ status: "ok", result: "mocked cursor output" }),
+  },
+}));
+
 import {
   ClaudeCodeAdapter,
   CodexAdapter,
@@ -162,9 +172,8 @@ describe("CursorAdapter (T-56)", () => {
     expect(progress).toBeDefined();
   });
 
-  it("live_mode_with_apiKey_attempts_sdk_then_falls_back_or_errors", async () => {
-    // @cursor/sdk is not installed in this repo → expect either fallback
-    // (ModuleNotFound) or a clean error event, never a throw.
+  it("live_mode_with_apiKey_uses_sdk_path_and_emits_done", async () => {
+    // @cursor/sdk is mocked at file top to avoid sqlite3 native binding in CI.
     const config = makeStubConfig({
       adapterMode: "live",
       cursorApiKey: "sk-test",
@@ -176,8 +185,10 @@ describe("CursorAdapter (T-56)", () => {
       workDir: "/tmp",
       sessionKey: "s1",
     });
-    // Either fallback path (done from cc-connect) or sdk error event
-    expect(events.length).toBeGreaterThan(0);
+    // Mock returns { status: "ok", result: "mocked cursor output" }
+    const done = events.find((e) => e.type === "done");
+    expect(done).toBeDefined();
+    expect(done?.content).toContain("mocked cursor output");
   });
 
   it("status_delegates_to_cc_connect_fallback", async () => {
