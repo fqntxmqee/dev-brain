@@ -15,6 +15,7 @@ import {
   checkHeadlessConfig,
   migrateToHeadless,
   applyHeadlessConfig,
+  undoHeadlessConfig,
 } from "./migrate-headless.js";
 import { toErrorMessage } from "../core/error-utils.js";
 
@@ -109,6 +110,53 @@ program
   });
 
 program
+  .command("show")
+  .description("渲染已完成任务的 postmortem 摘要 (T-67)")
+  .argument("<taskId>", "任务 ID（短 12 字符即可）")
+  .option("--subtask <id>", "输出指定子任务全量文本")
+  .action((taskId: string, opts: { subtask?: string }) => {
+    const app = createDevBrainApp();
+    const result = app.brain.findCompleted(taskId);
+    if (!result) {
+      process.stderr.write(`❌ 任务不存在或未完成：${taskId}\n`);
+      process.exit(1);
+      return;
+    }
+    if (opts.subtask) {
+      const sub = result.subTaskOutputs.find(
+        (o) => o.subTaskId === opts.subtask,
+      );
+      if (!sub) {
+        process.stderr.write(`❌ 子任务不存在：${opts.subtask}\n`);
+        process.exit(1);
+        return;
+      }
+      process.stdout.write(`${sub.output}\n`);
+      return;
+    }
+    process.stdout.write(`${result.summary}\n`);
+  });
+
+program
+  .command("list")
+  .description("列出最近 N 条已完成任务 (T-67)")
+  .option("--limit <n>", "条数", "10")
+  .action((opts: { limit: string }) => {
+    const app = createDevBrainApp();
+    const limit = Number.parseInt(opts.limit, 10) || 10;
+    const items = app.brain.listRecent(limit);
+    if (items.length === 0) {
+      process.stdout.write("（无已完成任务）\n");
+      return;
+    }
+    const lines = items.map((r) => {
+      const short = r.taskId.slice(0, 12);
+      return `${r.success ? "✅" : "❌"} ${short}  ${r.summary.slice(0, 80).replace(/\n/g, " ")}`;
+    });
+    process.stdout.write(`${lines.join("\n")}\n`);
+  });
+
+program
   .command("doctor")
   .description("环境自检：cc-connect / Cursor / 飞书凭证")
   .action(async () => {
@@ -144,12 +192,14 @@ program
   )
   .option("--check", "仅检查当前配置")
   .option("--apply", "备份并原地应用 headless 配置（生产切换）")
+  .option("--undo <backup>", "从备份回滚")
   .option("--dry-run", "不写入文件")
   .option("-o, --output <path>", "输出路径", "")
   .action(
     async (opts: {
       check?: boolean;
       apply?: boolean;
+      undo?: string;
       dryRun?: boolean;
       output: string;
     }) => {
@@ -160,6 +210,16 @@ program
         const check = await checkHeadlessConfig(sourcePath);
         process.stdout.write(`${formatHeadlessCheckReport(check)}\n`);
         process.exit(check.ok ? 0 : 1);
+        return;
+      }
+
+      if (opts.undo) {
+        const result = await undoHeadlessConfig({
+          backupPath: opts.undo,
+          targetPath: sourcePath,
+        });
+        process.stdout.write(`${result.message}\n`);
+        process.exit(result.restored ? 0 : 1);
         return;
       }
 

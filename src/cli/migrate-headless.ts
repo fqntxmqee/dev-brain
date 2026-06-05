@@ -222,8 +222,24 @@ export async function applyHeadlessConfig(options: {
     ],
   );
 
+  // 原子写入（CAP-CLI-11 / T-73）：
+  //   1. 先 copyFile 备份原文件（独立步骤，失败不污染）
+  //   2. writeFile(.tmp.new) → rename(.tmp.new, real)
+  //   3. 任一步失败清理 .tmp.new，保留 .bak.<ts>
   await copyFile(options.sourcePath, backupPath);
-  await writeFile(options.sourcePath, content, "utf8");
+  const tmpNew = `${options.sourcePath}.tmp.new`;
+  try {
+    await writeFile(tmpNew, content, "utf8");
+    await rename(tmpNew, options.sourcePath);
+  } catch (err) {
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(tmpNew);
+    } catch {
+      // ignore cleanup failure
+    }
+    throw err;
+  }
 
   return {
     configPath: options.sourcePath,

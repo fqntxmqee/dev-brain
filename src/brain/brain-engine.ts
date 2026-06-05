@@ -303,6 +303,18 @@ export class BrainEngine {
     };
   }
 
+  /** 列出最近 N 条已完成任务（CLI list 子命令 / T-67） */
+  listRecent(limit: number = 10): ReadonlyArray<BrainTaskResult> {
+    return this.completed.slice(-limit).reverse();
+  }
+
+  /** 找指定 taskId 的完成记录（CLI show / T-67） */
+  findCompleted(taskId: string): BrainTaskResult | undefined {
+    return [...this.completed]
+      .reverse()
+      .find((r) => r.taskId === taskId || r.taskId.startsWith(taskId));
+  }
+
   formatStatusText(): string {
     const s = this.getStatus();
     const locked = [...this.fileLocks.getLockedFilePaths()];

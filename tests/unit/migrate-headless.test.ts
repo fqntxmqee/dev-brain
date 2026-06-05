@@ -8,6 +8,7 @@ import {
   applyHeadlessConfig,
   stripPlatformBlocks,
   escapeTomlStringForTest,
+  undoHeadlessConfig,
 } from "../../src/cli/migrate-headless.js";
 
 describe("migrate-headless", () => {
@@ -93,5 +94,35 @@ describe("migrate-headless", () => {
     expect(escapeTomlStringForTest("/tmp/multi\nline")).toBe(
       "/tmp/multi\\nline",
     );
+  });
+});
+
+describe("undoHeadlessConfig (T-35 / T-73 / T-76)", () => {
+  it("restores_from_backup_atomically", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dev-brain-undo-"));
+    const targetPath = join(dir, "config.toml");
+    const backupPath = join(dir, "config.toml.bak.test");
+    const original = '[[projects]]\nname = "original"\n';
+    const modified = '[[projects]]\nname = "modified"\n';
+
+    await writeFile(targetPath, modified, "utf8");
+    await writeFile(backupPath, original, "utf8");
+
+    const result = await undoHeadlessConfig({ backupPath, targetPath });
+    expect(result.restored).toBe(true);
+
+    const restored = await readFile(targetPath, "utf8");
+    expect(restored).toBe(original);
+  });
+
+  it("returns_not_restored_when_backup_missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dev-brain-undo-miss-"));
+    const targetPath = join(dir, "config.toml");
+    const backupPath = join(dir, "missing.bak");
+    await writeFile(targetPath, "abc", "utf8");
+
+    const result = await undoHeadlessConfig({ backupPath, targetPath });
+    expect(result.restored).toBe(false);
+    expect(result.message).toContain("备份不存在");
   });
 });
