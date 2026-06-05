@@ -1,9 +1,32 @@
+import { z } from "zod";
 import type {
   CardActionType,
   FeishuCardAction,
   FeishuInboundEvent,
   FeishuInboundMessage,
 } from "../core/types.js";
+
+/** 飞书 open_id 格式：以 `ou_` 开头的字符串 */
+const OpenIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, "open_id contains illegal characters")
+  .refine((s) => !s.includes("\0"), "open_id must not contain NUL");
+
+/** chat_id 格式：以 `oc_` 开头 */
+const ChatIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, "chat_id contains illegal characters");
+
+/** message_id 格式：以 `om_` 开头 */
+const MessageIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, "message_id contains illegal characters");
 
 const CARD_ACTION_EVENTS = new Set([
   "card.action.trigger",
@@ -103,10 +126,24 @@ export function parseFeishuMessageEvent(
       return undefined;
     }
 
+    // 校验关键字段：open_id / chat_id / message_id 拒绝畸形值
+    const openIdResult = OpenIdSchema.safeParse(
+      event.sender?.sender_id?.open_id ?? "",
+    );
+    const chatIdResult = ChatIdSchema.safeParse(event.message.chat_id);
+    const msgIdResult = MessageIdSchema.safeParse(event.message.message_id);
+    if (
+      !openIdResult.success ||
+      !chatIdResult.success ||
+      !msgIdResult.success
+    ) {
+      return undefined;
+    }
+
     return {
-      messageId: event.message.message_id,
-      chatId: event.message.chat_id,
-      senderOpenId: event.sender?.sender_id?.open_id ?? "unknown",
+      messageId: msgIdResult.data,
+      chatId: chatIdResult.data,
+      senderOpenId: openIdResult.data,
       senderName: event.sender?.name ?? "user",
       text,
     };
