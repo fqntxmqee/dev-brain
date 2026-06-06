@@ -25,6 +25,13 @@ import {
   MetricsServer,
 } from "../observability/metrics-server.js";
 import { getMetrics, startProcessCollector } from "../observability/metrics.js";
+import { SpecWorkflow } from "../gateway/spec-workflow.js";
+import { StubDebateParticipant } from "../gateway/spec-participants.js";
+import { OpenSpecWriter } from "../openspec/writer.js";
+import { ClassifierOrchestrator } from "../intent/classifier.js";
+import { FallbackClassifier } from "../intent/fallback-classifier.js";
+import type { IntentContext } from "../intent/types.js";
+import type { DebateParticipant } from "../debate/types.js";
 
 const program = new Command();
 
@@ -366,6 +373,12 @@ program
         "1": "任务不存在 / 解析失败",
         "2": "（无）",
       },
+      {
+        command: "spec",
+        "0": "流水线成功 + 已写入 openspec/changes/{id}/",
+        "1": "classify / debate / generate / write 任一阶段失败",
+        "2": "（无）",
+      },
     ];
 
     const lines = [
@@ -389,6 +402,126 @@ program
     ];
     process.stdout.write(`${lines.join("\n")}\n`);
   });
+
+program
+  .command("spec")
+  .description(
+    "Spec-driven 流水线: 意图分类 → 辩论 → OpenSpec 生成 → 写入 openspec/changes/{id}/",
+  )
+  .argument("<text>", "需求文本")
+  .option(
+    "--out <dir>",
+    "OpenSpec 根目录（默认 ./openspec/changes/）",
+    "openspec/changes",
+  )
+  .option("--no-write", "仅生成 OpenSpec artifact,不写盘(返回 JSON 到 stdout)")
+  .option("--chat-id <id>", "IntentContext.chatId(默认 cli-local)", "cli-local")
+  .action(
+    async (
+      text: string,
+      opts: { out: string; write: boolean; chatId: string },
+    ) => {
+      const logger = defaultLogger.child({ component: "cli-spec" });
+
+      // classifier: 没接 DeepSeek key 时走 FallbackClassifier (Phase A.6 走通链路)
+      const enableFallback =
+        (process.env.DEV_BRAIN_DISABLE_FALLBACK ?? "").toLowerCase() !== "true";
+      const classifier = new ClassifierOrchestrator(
+        {
+          deepseek: {
+            apiKey: process.env.DEEPSEEK_API_KEY ?? "",
+            model: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+            timeoutMs: 30000,
+            maxRetries: 1,
+          },
+          cache: { maxEntries: 100, ttlMs: 600_000 },
+          enableFallback,
+          fallbackWarnThreshold: 3,
+        },
+        {
+          fallbackOverride: new FallbackClassifier(),
+          logger,
+        },
+      );
+
+      // 两个 stub 参与者(后续 Phase B 接 native claude/codex 适配器)
+      const participantA: DebateParticipant = new StubDebateParticipant({
+        name: "claude",
+      });
+      const participantB: DebateParticipant = new StubDebateParticipant({
+        name: "codex",
+      });
+
+      const writer = opts.write
+        ? new OpenSpecWriter({
+            rootDir: opts.out,
+            logger,
+          })
+        : undefined;
+
+      const wf = new SpecWorkflow(
+        {
+          debate: {
+            maxRounds: 3,
+            roundTimeoutMs: 60_000,
+            consensusThreshold: 0.85,
+            deltaConvergenceThreshold: 2,
+            deltaThreshold: 0.05,
+          },
+        },
+        {
+          classifier,
+          participantA,
+          participantB,
+          writer,
+          logger,
+        },
+      );
+
+      const context: IntentContext = {
+        chatId: opts.chatId,
+        senderOpenId: "cli-user",
+      };
+
+      try {
+        const result = await wf.run({ text, context });
+        if (!opts.write) {
+          process.stdout.write(
+            `${JSON.stringify(
+              {
+                trace_id: result.traceId,
+                demand_id: result.demandId,
+                change_id: result.artifact.changeId,
+                consensus_rate: result.consensus.consensus_rate,
+                rounds: result.rounds,
+                intent: result.intent.type,
+                specs: Object.keys(result.artifact.specs),
+              },
+              null,
+              2,
+            )}\n`,
+          );
+        } else {
+          process.stdout.write(
+            [
+              `✅ spec pipeline completed`,
+              `  trace_id:    ${result.traceId}`,
+              `  demand_id:   ${result.demandId}`,
+              `  change_id:   ${result.artifact.changeId}`,
+              `  intent:      ${result.intent.type} (source=${result.intent.source})`,
+              `  consensus:   ${result.consensus.consensus_rate.toFixed(2)} (rounds=${result.rounds})`,
+              `  written:     ${result.writeResult.rootPath}`,
+              `  files:       ${result.writeResult.files.join(", ")}`,
+            ].join("\n") + "\n",
+          );
+        }
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        process.stderr.write(`❌ spec pipeline failed: ${msg}\n`);
+        process.exit(1);
+      }
+    },
+  );
 
 // 退出码契约（运维/CI 可依赖）：
 //   0  成功 / 已是目标状态 / dry-run

@@ -8,6 +8,7 @@ export const HELP_TEXT = [
   "/show <taskId> [--subtask <id>]  — 渲染 postmortem",
   "/retry <taskId>  — 重试失败子任务",
   "/list  — 列出最近任务",
+  "/spec <text>  — 跑意图+辩论+OpenSpec 流水线,写入 openspec/changes/{id}/",
   "/help    — 显示本帮助",
 ].join("\n");
 
@@ -20,6 +21,7 @@ export type IntentType =
   | "show"
   | "retry"
   | "list"
+  | "spec"
   | "unknown";
 
 export interface ParsedIntent {
@@ -96,6 +98,12 @@ export function parseIntent(text: string): ParsedIntent {
       };
     case "list":
       return { type: "list", rawText: stripped };
+    case "spec":
+      return {
+        type: "spec",
+        rawText: stripped,
+        ...(args.taskArg ? { arg: args.taskArg } : {}),
+      };
     default:
       return { type: "unknown", rawText: stripped, unknownCommand: cmd };
   }

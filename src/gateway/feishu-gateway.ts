@@ -171,6 +171,9 @@ export class FeishuGateway {
         case "list":
           replyText = "📜 任务列表：暂未实现";
           break;
+        case "spec":
+          replyText = `🧪 /spec 暂未在飞书端启用。请用 CLI:\n  pnpm cli spec "${intent.arg ?? "<需求文本>"}"\n（端到端流水线: 意图+辩论+OpenSpec, 写入 openspec/changes/{id}/）`;
+          break;
         case "unknown":
           replyText = `未知指令：/${intent.unknownCommand ?? "?"}。回复 /help 查看支持指令`;
           break;
