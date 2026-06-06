@@ -90,7 +90,7 @@ describe("MetricsRegistry — register/accessor/snapshot (v0.7.0)", () => {
     expect(r.get("brain.tasks.completed")).toBe(3);
   });
 
-  it("registerAll_emits_all_27_metrics", () => {
+  it("registerAll_emits_all_37_metrics", () => {
     const r = new MetricsRegistry();
     r.registerAll();
     const text = r.getMetricsText();
@@ -186,16 +186,15 @@ describe("MetricsRegistry — getMetricsText output format (v0.7.0)", () => {
     expect(r.getMetricsText().endsWith("\n")).toBe(true);
   });
 
-  it("output_count_matches_registered_count_24_27", () => {
+  it("output_count_matches_registered_count_53", () => {
     const r = new MetricsRegistry();
     r.registerAll();
     const text = r.getMetricsText();
-    // v0.9.0: 30 counters + 9 gauges + 4 histograms = 43 metric families
-    // (was 24 counters; v0.9.0 added 6: auth_expired / rate_limited /
-    //  retry_succeeded / text.chunked / text.chunk_count_total / card.degraded)
+    // v0.10.0 Phase A.5: 37 counters + 9 gauges + 7 histograms = 53 metric families
+    // (v0.9.0: 30+9+4=43; +7 new counters + 3 new histograms = +10)
     // Each family has 1 # HELP + 1 # TYPE + ≥1 value lines
     const helpLines = text.split("\n").filter((l) => l.startsWith("# HELP "));
-    expect(helpLines.length).toBe(30 + 9 + 4);
+    expect(helpLines.length).toBe(37 + 9 + 7);
   });
 });
 
@@ -227,7 +226,7 @@ describe("getMetrics() singleton (v0.7.0)", () => {
     expect(a).toBe(b);
   });
 
-  it("fresh_singleton_emits_all_27_metric_families", () => {
+  it("fresh_singleton_emits_all_37_metric_families", () => {
     const text = getMetrics().getMetricsText();
     expect(text).toContain("# TYPE brain.tasks.completed counter");
     expect(text).toContain("# TYPE brain.pending_plans gauge");

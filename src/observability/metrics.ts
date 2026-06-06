@@ -10,7 +10,7 @@
  * - 后向兼容 v0.6.0：inc/get/snapshot/getMetricsText 接口不变
  * - Fail-soft：通过 safe<T>() 包装调用方永远不会因 metrics 抛错
  * - 预声明：所有已知 metric 在 registry 首次访问时注册（getMetricsText
- *   即使零观测值也会输出全部 27 个 series）
+ *   即使零观测值也会输出全部 37 个 series）
  */
 
 import type { Logger } from "../core/logger.js";
@@ -73,6 +73,18 @@ const COUNTER_HELP: Readonly<Record<string, string>> = {
   "http.healthz.requests": "Total HTTP /healthz requests",
   "http.readyz.requests": "Total HTTP /readyz requests",
   "http.404.requests": "Total HTTP requests to unknown path",
+  // v0.10.0 Phase A.5 — spec-driven-workflow observability (CAP-OBS-02)
+  "debate.rounds.total":
+    "Total debate runs (1-3 rounds each, outcome=converge|exhausted)",
+  "debate.converge_total": "Total debate runs that converged within maxRounds",
+  "openspec.generated_total":
+    "Total OpenSpec artifacts generated (proposal+specs+tasks)",
+  "runtime.checkpoint_writes": "Total checkpoint.write() successful writes",
+  "runtime.context_budget_triggers":
+    "Total times context-budget auto-summarise fired",
+  "runtime.retry_total":
+    "Total retry-policy retries attempted (success+exhausted)",
+  "runtime.resume_total": "Total ResumeManager.scan() resume plans produced",
 };
 
 const GAUGE_HELP: Readonly<Record<string, string>> = {
@@ -96,6 +108,13 @@ const HISTOGRAM_HELP: Readonly<Record<string, string>> = {
     "cc-connect send() call duration (live mode) in seconds",
   "gateway.message.duration_seconds":
     "Feishu message handling duration in seconds",
+  // v0.10.0 Phase A.5 — spec-driven-workflow observability (CAP-OBS-02)
+  "intent.classify.duration_seconds":
+    "Intent classification call duration in seconds (label: source)",
+  "debate.consensus_score":
+    "Distribution of final debate consensus_rate (0..1)",
+  "runtime.checkpoint.duration_seconds":
+    "Per checkpoint.write() duration in seconds",
 };
 
 const DEFAULT_BUCKETS_SECONDS: readonly number[] = [
@@ -235,7 +254,7 @@ export class MetricsRegistry {
     return h;
   }
 
-  /** 预声明所有已知 metrics（v0.7.0 起步：27 个 series） */
+  /** 预声明所有已知 metrics（v0.7.0 起步 27 + v0.10.0 加 10 = 37 个 series） */
   registerAll(): void {
     for (const name of Object.keys(COUNTER_HELP)) {
       this.registerCounter(name);
