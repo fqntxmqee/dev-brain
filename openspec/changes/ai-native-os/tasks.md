@@ -15,74 +15,13 @@ target-version: v0.11.0
 
 ## Phase D — Code Observability (P0, Week 1)
 
-> **目标:** 跑 4 项分析器,产出每日 `CodeHealthSnapshot`,上报 4 gauge metric。
-> 阻塞 Phase E 的 evolution(没有 snapshot 数据,insight 引擎产不出"代码侧"建议)。
-
-### D.1 依赖 + 类型骨架
-
-- [ ] `pnpm add -D ts-morph escomplex` (jscpd 走子进程,无需安装)
-- [ ] `src/observability/code-health/types.ts` 定义 `AstSnapshot` / `DeadcodeReport` / `ZombieReport` / `CodeHealthSnapshot`
-- [ ] `src/observability/metrics.ts` 注册 4 新 gauge: `code.dead_exports` / `code.complexity_p95` / `code.duplication_pct` / `code.zombie_files`
-- [ ] 1 counter: `code.ast.parse_failed_total{file}`
-
-### D.2 AstAnalyzer (CAP-CODE-01)
-
-- [ ] `src/observability/code-health/ast-analyzer.ts` — `class AstAnalyzer { parse(sources): Promise<AstSnapshot> }`
-- [ ] 用 `ts-morph` 解析 .ts,产出 `files[]` / `functions[]` / `exports[]`
-- [ ] 失败兜底:语法错文件单独 catch,产出 `{ path, error }` + 写 `code.ast.parse_failed_total`
-- [ ] mtime 缓存: `~/.dev-brain/code-health/ast-cache-<hash>.json`,基于文件 mtime 失效
-- [ ] 性能: 单文件 < 500ms (P95)
-- [ ] 单测 `tests/unit/code-health/ast-analyzer.test.ts`: 5 个 case (含语法错文件、缓存命中)
-
-### D.3 DeadcodeFinder (CAP-CODE-02)
-
-- [ ] `src/observability/code-health/deadcode-finder.ts` — 找 0 references 的 export
-- [ ] 豁免: 测试文件 (`*.test.ts` / `__tests__/`) + 入口 `src/index.ts`
-- [ ] 准确率 ≥ 90% (人工 spot-check 20 样本)
-- [ ] 动态 import 误报: 写 `code.deadcode.dynamic_import_missed_total` + 提示 `// @keepalive`
-- [ ] 7 天内新增文件豁免(避免新 API 误判)
-- [ ] 单测 `tests/unit/code-health/deadcode-finder.test.ts`: 含 fixture (legacy-helper + 动态 import)
-
-### D.4 ComplexityReporter + DuplicationScanner (CAP-CODE-03)
-
-- [ ] `src/observability/code-health/complexity-reporter.ts` — `escomplex` 算圈复杂度
-- [ ] 阈值默认 15,env `DEV_BRAIN_COMPLEXITY_DANGER=15` 可调
-- [ ] `src/observability/code-health/duplication-scanner.ts` — spawn `jscpd` 子进程,解析 JSON
-- [ ] jscpd 路径探测: `node_modules/.bin/jscpd` → 全局 `jscpd` → fallback 写 `code.duplication_scan_failed_total` + duplication_pct=-1
-- [ ] 单测 `tests/unit/code-health/complexity-reporter.test.ts` (mock escomplex)
-- [ ] 单测 `tests/unit/code-health/duplication-scanner.test.ts` (mock spawn)
-
-### D.5 ZombieDetector (CAP-CODE-04)
-
-- [ ] `src/observability/code-health/zombie-detector.ts` — 4 条件全满足才标 zombie: >90 天未改 / 无测试 / deadExports 含其导出 / LOC > 50
-- [ ] 复用 `git log -1 --format=%ct <file>` 拿最后改动时间
-- [ ] 测试覆盖判定: 反向扫描 `tests/**/*.test.ts` 找 import
-- [ ] env `DEV_BRAIN_ZOMBIE_DAYS=90` 可调
-- [ ] 单测 `tests/unit/code-health/zombie-detector.test.ts`: 4 场景 (命中/活跃/LOC 过滤/无测试)
-
-### D.6 Snapshot 打包 (集成)
-
-- [ ] `src/observability/code-health/snapshot.ts` — `CodeHealthSnapshot.build(projectRoot)`
-- [ ] 顺序跑 5 步,异常隔离 (jscpd 失败不影响其他)
-- [ ] 落 `~/.dev-brain/code-health/<YYYY-MM-DD>.json`
-- [ ] cron 每日 02:00 触发
-- [ ] 写 `code.snapshot.taken_total` / `code.snapshot.failed_total` / `code.snapshot.partial_total`
-- [ ] 单测 `tests/unit/code-health/snapshot.test.ts`: 完整路径 + jscpd 失败 partial
-
-### D.7 Grafana + 文档
-
-- [ ] `ops/grafana/dev-brain-dashboard.json` 加 panel "Code Health (v0.11.0)",4 个 metric
-- [ ] `docs/code-health.md` (新) — 4 项观测含义 + 5 个 Playbook
-- [ ] `docs/observability.md` (扩) — 加 5 个新 metric 含义
-- [ ] `tests/unit/ops-files.test.ts` 更新 panel 数量断言 (17 → 18)
-
-### D.8 验证
-
-- [ ] `pnpm typecheck` 绿
-- [ ] `pnpm test` 绿 (561 → ~600 测试)
-- [ ] `pnpm test:coverage` 维持 85%/74%
-- [ ] 实跑 `CodeHealthSnapshot.build(dev-brain/)` 验证产出 + metric 上报
-- [ ] jscpd 未装时 graceful skip,partial_total 写入
+> 详细任务见 `specs/code-observability/tasks.md`。核心交付:
+> - AstAnalyzer (ts-morph + worker_thread 隔离) — CAP-CODE-01
+> - DeadcodeDetector (KnipAdapter 入口驱动图主路径 + DeadcodeFinder 降级) — CAP-CODE-02
+> - ComplexityReporter + DuplicationScanner (可插拔后端 + CRAP + 认知复杂度) — CAP-CODE-03
+> - ZombieDetector 加权评分 + HotspotScorer (CodeScene 风格) + AICodeSmellDetector — CAP-CODE-04
+> - SnapshoDelta 增量比较 + CodeHealthForEvolution 数据契约
+> - 新增 ~28 测试场景 (~8 测试文件)
 
 ---
 

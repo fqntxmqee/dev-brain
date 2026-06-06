@@ -30,16 +30,20 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 
 ## Scope (本 change — v0.11.0+)
 
-**Phase D — 代码态可观测 (P0, 1 周) → 给 Phase E 铺数据**
+**Phase D — 代码态可观测 (P0, 1 周) → 给 Phase E 铺数据** — **v0.11.0 修订**: 经 knip / CodeScene / SonarQube 行业调研增强
 
-13. `src/observability/code-health/ast-analyzer.ts` — `ts-morph` 解析,产出函数列表 + 调用图
-14. `src/observability/code-health/deadcode-finder.ts` — 找未被引用的 exports + class methods
-15. `src/observability/code-health/complexity-reporter.ts` — `escomplex` 算圈复杂度,标 > 15 的危险函数
-16. `src/observability/code-health/duplication-scanner.ts` — 调 `jscpd` 算代码重复率
-17. `src/observability/code-health/zombie-detector.ts` — `git log -1` 拿最后改动时间,> 90 天且无测试覆盖的模块
-18. `src/observability/code-health/snapshot.ts` — 4 项打包成 `CodeHealthSnapshot`, 写 `~/.dev-brain/code-health/<date>.json` + 上报 4 个新 metric
-19. 新增 4 metric: `code.dead_exports` (gauge) / `code.complexity_p95` (gauge) / `code.duplication_pct` (gauge) / `code.zombie_files` (gauge)
-20. Grafana 加 1 panel "Code Health (v0.11.0)"
+13. `src/observability/code-health/ast-analyzer.ts` — `ts-morph` 解析 (worker_thread 隔离),产出函数列表 + 调用图
+14. `src/observability/code-health/deadcode-detector.ts` — **修订**: KnipAdapter (入口驱动图, 主路径) + DeadcodeFinder (引用计数, 降级)
+15. `src/observability/code-health/knip-adapter.ts` — **NEW**: 调 `npx knip --reporter json`,入口驱动的模块图算法
+16. `src/observability/code-health/complexity-reporter.ts` — **修订**: 可插拔后端 (escomplex 默认) + CRAP 评分 + 认知复杂度 + 变更频率
+17. `src/observability/code-health/duplication-scanner.ts` — **修订**: 可插拔后端 (jscpd 默认)
+18. `src/observability/code-health/zombie-detector.ts` — **修订**: 加权评分替代 AND 判定 + HotspotScorer (CodeScene 风格 churn×complexity)
+19. `src/observability/code-health/hotspot-scorer.ts` — **NEW**: 文件级热点评分 (age + churn + complexity + deadRefs + testGap)
+20. `src/observability/code-health/ai-smell-detector.ts` — **NEW**: AI 专属代码气味 (过度抽象/幻觉import/未用抽象/深层嵌套)
+21. `src/observability/code-health/snapshot.ts` — **修订**: 6 步打包 (增加 AI smell) + SnapshoDelta 增量比较
+22. `src/observability/code-health/snapshot-comparator.ts` — **NEW**: 今日 vs 昨日 delta, trend 判定 (improving/stable/degrading)
+23. 新增 8+ metric: 原 4 gauge + 4 delta gauge + hotspot_avg_score + hotspot_danger_count + ai_smell_total
+24. Grafana 更新 panel "Code Health (v0.11.0)"
 
 **Phase E — 自我进化闭环 (P0, 2 周) → "AI 驱动 AI" 核心**
 
@@ -148,8 +152,9 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 ## 关联文件
 
 **新增 (Phase D)**:
-- `src/observability/code-health/{ast-analyzer,deadcode-finder,complexity-reporter,duplication-scanner,zombie-detector,snapshot}.ts`
-- `tests/unit/code-health/*.test.ts`
+- `src/observability/code-health/{types,ast-analyzer,deadcode-detector,knip-adapter,deadcode-finder,complexity-reporter,duplication-scanner,zombie-detector,hotspot-scorer,ai-smell-detector,snapshot,snapshot-comparator,evolution-contract}.ts`
+- `src/observability/code-health/backends/types.ts` — `ComplexityBackend` / `DuplicationBackend` 接口
+- `tests/unit/code-health/*.test.ts` (~28 场景)
 
 **新增 (Phase E)**:
 - `src/evolution/{insight-engine,diagnostic-llm,rule-validator,eval-runner,task-pool,evolution-service,circuit-breaker,feedback-collector,l3-memory}.ts`
@@ -166,17 +171,17 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 - `tests/unit/{gateway,context,runtime}/*.test.ts` (~25 runtime 场景)
 
 **修改**:
-- `src/observability/metrics.ts` — 加 ~20 新 metric (4 code + ~10 evolution + ~10 context)
+- `src/observability/metrics.ts` — 加 ~30 新 metric (8 code + ~10 evolution + ~10 context + ~2 runtime checkpoint/sandbox)
 - `src/context/compressor.ts` — 移除 (功能合并到 SleeptimeContextAgent)
 - `ops/grafana/dev-brain-dashboard.json` — 加 2 panel
 - `src/brain/brain-engine.ts` — 接入 recall-strategy, inject-plan, evolution-service, acceptance-pipeline
 - `src/gateway/feishu-gateway.ts` — 接入 streaming-pusher, signature-verifier
 - `src/runtime/orchestrator.ts` — 替换 ad-hoc retry 为 state-machine + self-correction
-- `src/config/env.ts` — 新增 ~17 env: 含 recall 权重 / L2 token 阈值 / InjectPlan 预算 / circuit breaker 等
-- `package.json` — 新增 3 prod dep: `ts-morph` `escomplex` `jscpd` (调子进程)
+- `src/config/env.ts` — 新增 ~20 env: 含 zombie score 阈值 / hotspot 权重 / recall 权重 / L2 token 阈值 / InjectPlan 预算 / circuit breaker 等
+- `package.json` — 新增 2 prod dep: `ts-morph` `escomplex` (jscpd 走子进程, knip 可选)
 
 **文档**:
-- `docs/code-health.md` (新) — 4 项观测含义 + Playbook
+- `docs/code-health.md` (新) — 7 项观测含义 + 6 个 Playbook (含 delta degrading / hotspot danger / AI smell 处置)
 - `docs/evolution.md` (新) — 自我进化流程 + 评测套件 + 回滚指南
 - `docs/observability.md` (扩) — 加 8 个新 metric 含义
 - `docs/USAGE.md` (扩) — 加"代码健康检查" + "prompt 回滚" + "Self-Correction 调试" 章
