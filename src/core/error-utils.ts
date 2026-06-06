@@ -22,6 +22,29 @@ export function toErrorMessage(err: unknown): string {
   }
 }
 
+/**
+ * 给 promise 加超时包装。超时抛 Error,带 prefix。
+ * 不会 abort 原 promise(防止副作用泄漏),但调用方通常已超时返回即可。
+ */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  prefix: string = "operation",
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${prefix} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** 仅返回错误名（用于日志） */
 export function toErrorName(err: unknown): string {
   if (err === null || err === undefined) return "UnknownError";
