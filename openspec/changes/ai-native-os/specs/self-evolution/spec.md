@@ -9,25 +9,40 @@ status: developing
 本文为 AI Native OS 引入 4 项自我进化能力: insight 聚合 → LLM 诊断 → 评测回归 → 替换落库。
 v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 spec 把"失败 → 修复"做成闭环。
 
-## CAP-EVO-01 (NEW) Insight 聚合引擎
+> **v0.11.0 修订 1** (博弈论审查): CAP-EVO-02 全量双轨 RuleValidator + CAP-EVO-03 A/B Split + CAP-EVO-05 熔断 + CAP-EVO-06 用户反馈。
+> **v0.11.0 修订 2** (行业调研): CAP-EVO-01 成功模式挖掘 + CAP-EVO-02 RV-5 Goal Drift Index + Reasoning Trace + CostBudget + ProvenanceChain。详见 `design.md`。
 
-**Given** CodeHealthSnapshot (Phase D) + 失败 trace JSONL (`~/.dev-brain/failures/failures-YYYY-MM-DD.jsonl`)
+## CAP-EVO-01 (REVISED) Insight 聚合引擎 — 失败 + 成功双信号
+
+> **v0.11.0 修订 2**: DSPy BootstrapFewShot 启发 — 成功模式的价值可能大于失败分析。新增成功 trace 分析,提取 positive pattern。
+
+**Given** CodeHealthSnapshot (Phase D) + 失败 trace JSONL + **成功 trace** (acceptance 全 pass 的 subtask, NEW)
 **When** InsightEngine 周期任务触发(每 6h 一次,cron)
 **Then** 拉最近 7 天数据,聚合产出 `Insight` 候选列表:
   - 分类四类: `context` (召回不足) / `spec` (规范不清) / `prompt` (模板不优) / `agent-stability` (超时/沙箱失败)
-  - 每条 insight 含: `{ id, category, summary, evidenceRefs[], severity: low|med|high, suggestedFix }`
+  - 每条 insight 含: `{ id, type: "negative"|"positive", category, summary, evidenceRefs[], severity: low|med|high }`
   - 优先级: severity × 频次 = score,取 top 10
-**And** 写 `evolution.insights_produced_total` +N (N = produced),`evolution.insights_applied_total` 后续在 EVO-04 落库时计
+**And** **成功模式挖掘** (NEW): 扫描成功 trace,提取高频 prompt 特征:
+  - prompt 中含 "≥ N 个 case" → 测试覆盖好 (pass rate > 基准)
+  - prompt 中含 "先读 spec" → spec 遵循度高
+  - prompt 中含具体示例 → 输出质量高
+  - 聚合 > 3 次出现的模式 → insight type="positive"
+**And** 写 `evolution.insights_produced_total` +N, `evolution.positive_insights_total` (NEW) for positive
 **And** 7 天内同 category 重复 insight 去重(避免刷屏)
 
 **实现要点:**
-- `src/evolution/insight-engine.ts` — `class InsightEngine { run(): Promise<Insight[]>; }`
-- 输入: `codeHealth` snapshot (最近 7 天) + `failures` JSONL (按 trace_id 聚合)
-- 分类启发式:
+- `src/evolution/insight-engine.ts` — `class InsightEngine { run(): Promise<Insight[]>; extractSuccessPatterns(successes): Insight[] }`
+- 输入: `codeHealth` snapshot (最近 7 天) + `failures` JSONL + **`successes` JSONL** (NEW)
+- 分类启发式 (失败):
   - `context`: 失败 trace 中含 "missing context" / "不知道" / "上下文" 关键词
   - `spec`: OpenSpec acceptance 阶段有 "not implemented" / "missing field"
   - `prompt`: 同一 prompt 模板 7 天失败 ≥ 3 次
   - `agent-stability`: 含 "timeout" / "heartbeat_lost" / "sandbox_rollback"
+- **成功模式提取** (NEW):
+  - 扫描 acceptance 全 pass 的 subtask 的 prompt
+  - 统计高频特征词与 pass rate 的相关性
+  - 相关性 > 0.3 且出现 > 3 次 → positive insight
+  - type="positive", severity 默认 "low"
 - 输出 JSON 落 `~/.dev-brain/evolution/insights-<date>.json`,供 DiagnosticLLM 消费
 
 **Scenario: 聚合出 3 条 insight**
@@ -52,9 +67,17 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 - THEN 写 `evolution.insights_skipped_total{reason="insufficient_data"}` +1
 - AND 不产空 list,等下个周期
 
-## CAP-EVO-02 (REVISED) LLM 诊断 — 全量双轨验证 + 分离判断与建议
+**Scenario: 成功模式被发现 (NEW)**
+- GIVEN 近 7 天 30 个成功 subtask,其中 15 个 prompt 含 "先完整阅读 spec"
+- WHEN InsightEngine 分析 prompt 特征
+- THEN 发现: "含 '先完整阅读 spec' 的 prompt → pass rate 92% vs 基准 78% (delta=+14pp)"
+- AND 产出 insight { type="positive", summary="前置 spec 阅读指令提升 14pp 通过率" }
+- AND 写 `evolution.positive_insights_total` +1
 
-> **v0.11.0 修订**: 原设计仅使用单模型自评 confidence 阈值 (>= 0.5) 做门控。经博弈论审查发现存在委托代理困境 — DiagnosticLLM 有动机策略性输出高置信度。修订为全量双轨 RuleValidator + 分离判断与建议。
+## CAP-EVO-02 (REVISED v2) LLM 诊断 — 双轨验证 + Goal Drift + Reasoning Trace
+
+> **v0.11.0 修订 1**: 全量双轨 RuleValidator + 分离判断与建议 (博弈论审查)。
+> **v0.11.0 修订 2**: RV-5 Goal Drift Index (DGM 案例防护) + Agent Reasoning Trace 作为可选 evidence (GReaTer 启发)。
 
 ### 阶段 1: 诊断 (必过 RuleValidator Level 1)
 
@@ -87,8 +110,10 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 | RV-2 | rootCause 与 rationale 是否逻辑一致 (不能自相矛盾) | 简单规则 (如 rootCause="prompt" 时 rationale 必须提及 prompt 模板) |
 | RV-3 | confidence 是否在合理范围 (0.1~0.95,禁止极端值 0/1) | 数值范围检查 |
 | RV-4 | diagnostic 输出格式完整 (insightId/rootCause/rationale/confidence 齐全) | schema 校验 |
+| **RV-5** (NEW) | **diff 未削弱安全约束** (DGM 案例防护) | 检查 diff 删除行是否移除: (a) 测试要求关键词 (vitest/test/case) (b) 强制性措辞 (must/shall/必须) (c) spec 引用 (CAP-*-*) |
 
 **And** Level 1 **任一不通过** → diagnostic 直接丢弃,写 `evolution.diagnostics_rejected_total{reason="rule_validator_l1"}` +1
+**And** RV-5 拦截时额外写 `evolution.goal_drift_detected_total` +1 (NEW)
 **And** Level 1 **全部通过** → 进入阶段 2 (建议生成),附带 priority 分数:
   - `priority = confidence * 0.3 + L2_satisfactions * 0.1 + attribution_match * 0.4`
   - L2_satisfactions: 阶段 2 中满足的 Level 2 规则数
@@ -129,9 +154,10 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 **And** DeepSeek 不可用时记 `evolution.diagnostics_failed_total`,跳过该 insight,不阻塞主循环
 
 **实现要点:**
-- `src/evolution/diagnostic-llm.ts` — `class DiagnosticLLM { diagnose(insight): Promise<Diagnostic>; suggestFix(diagnostic): Promise<Fix> }`
-- `src/evolution/rule-validator.ts` — `class RuleValidator { validateL1(d): ValidationResult; scoreL2(fix): L2Score }` (纯函数,确定性规则)
-- Level 1 规则硬编码,Level 2 规则走 YAML 配置 (`config/rule-validator.yaml`),允许后续扩展
+- `src/evolution/diagnostic-llm.ts` — `class DiagnosticLLM { diagnose(insight, agentReasoning?): Promise<Diagnostic>; suggestFix(diagnostic): Promise<Fix> }`
+- `src/evolution/rule-validator.ts` — `class RuleValidator { validateL1(d, diff?): ValidationResult; scoreL2(fix): L2Score; calculateGoalDrift(diff): number }` (纯函数,确定性规则)
+- Level 1 规则 (含 RV-5) 硬编码,Level 2 规则走 YAML 配置 (`config/rule-validator.yaml`)
+- **Agent Reasoning Trace** (NEW): L1FailureTrace 增加可选 `agentReasoning?: string` 字段,从 agent stdout 解析 `<thinking>` 标签内容,作为 DiagnosticLLM 的辅助 evidence
 - 复用 Phase A.1 (v0.10.0) DeepSeek client,不做新通道
 
 **Scenario: 正常诊断 + 双轨通过 + 建议生成**
@@ -152,6 +178,14 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 - WHEN RuleValidator L1
 - THEN RV-3 失败 (confidence > 0.95)
 - AND 丢弃,防止 DiagnosticLLM 策略性标高分
+
+**Scenario: RV-5 Goal Drift 拦截 (NEW)**
+- GIVEN diff 删除了一行 `- **必须**: 附带 vitest 单测,≥ 3 个 case`
+- WHEN RuleValidator L1 RV-5 检查
+- THEN 检测到: 删除行含 "vitest" + "case" + "必须" → goalDriftScore = -6
+- AND RV-5 失败,diff 被拦截
+- AND 写 `evolution.goal_drift_detected_total` +1
+- AND 写 `evolution.diagnostics_rejected_total{reason="rule_validator_l1"}` +1
 
 **Scenario: DeepSeek 不可用**
 - GIVEN DeepSeek API 503
@@ -239,9 +273,10 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 - THEN 该次跑标 timeout,不影响其他任务
 - AND 该任务在 Decision/Monitor 集统计中计为 FAILED
 
-## CAP-EVO-04 (REVISED) 进化服务编排
+## CAP-EVO-04 (REVISED v2) 进化服务编排 — CostBudget + ProvenanceChain
 
-> **v0.11.0 修订**: 流水线增加 RuleValidator 阶段、用户反馈检查、自动熔断前置检查。
+> **v0.11.0 修订 1**: 流水线增加 RuleValidator / 用户反馈检查 / 熔断前置检查 (博弈论审查)。
+> **v0.11.0 修订 2**: 增加 CostBudget 前置检查 + ProvenanceChain 增强溯源 (行业调研)。
 
 **Given** 上面阶段 (insight → diagnostic → RuleValidator → eval) 全部就绪
 **When** EvolutionService cron 触发(每 6h)
@@ -250,26 +285,28 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
   [cron 0 */6 * * *]
        ↓
   EvolutionService.runOnce()
-       ↓  ← 前置检查: 熔断器状态 (CAP-EVO-05)
-  1. InsightEngine.run() → insights[]
+       ↓  ← 前置检查 1: 熔断器状态 (CAP-EVO-05)
+       ↓  ← 前置检查 2: CostBudget.check() (NEW)
+  1. InsightEngine.run() → insights[] (含 positive + negative)
        ↓
   2. for insight in top-5:
-       DiagnosticLLM.diagnose(insight) → diagnostic
+       DiagnosticLLM.diagnose(insight, agentReasoning?) → diagnostic
        ↓
-       RuleValidator.validateL1(diagnostic) → pass/fail
-       if fail: skip, 写 rejected_total
+       RuleValidator.validateL1(diagnostic, diff?) → pass/fail
+       if fail: skip, 写 rejected_total (含 RV-5 goal drift)
        if pass: 计算 priority, 按 priority 排序
        ↓
        top 3 (by priority): DiagnosticLLM.suggestFix(diagnostic) → fix + diff
        ↓
   3. EvalRunner.run(diff) → evalReport
        ↓  ← 用户反馈检查 (CAP-EVO-06)
-  4. if evalReport.pass AND satisfaction_score >= -0.3:
+  4. if evalReport.pass AND satisfaction_score >= -0.3 AND goalDriftScore >= 0:
        a. apply diff (git apply --check → git apply)
        b. commit "evolution: <summary>"
-       c. L3LongTermMemory.write({...}, {fromEvolution: true})
-       d. 写 `evolution.prompts_evolved_total` +1
-       e. 进入 7 天观察期 (quarantine)
+       c. L3LongTermMemory.write({...}, {fromEvolution: true, provenance: {...}})
+       d. CostBudget.spend(actualTokens)   // NEW
+       e. 写 `evolution.prompts_evolved_total` +1
+       f. 进入 7 天观察期 (quarantine)
      else:
        diff 落 rejected/,记 rejected_total
   ```
@@ -280,6 +317,27 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 - `src/evolution/evolution-service.ts` — `class EvolutionService { runOnce(): Promise<RunSummary>; rollback(promptId): Promise<void>; }`
 - `src/evolution/l3-memory.ts` — `class L3LongTermMemory { read(); write(entry, opts?: { fromEvolution?: boolean }) }`,默认拒绝非 evolution 调用
 - `src/evolution/circuit-breaker.ts` — `class CircuitBreaker { isOpen(): boolean; recordResult(success: boolean): void }` (CAP-EVO-05)
+- `src/evolution/cost-budget.ts` — `class CostBudgetManager { check(cost): boolean; spend(cost): void; reset(): void }` (NEW)
+  - 每日预算默认 500K tokens (DeepSeek),env `DEV_BRAIN_EVOLUTION_DAILY_TOKEN_BUDGET` 可调
+  - 每次 runOnce 前置检查: `if (!costBudget.check(ESTIMATED_COST)) { skip; }`
+  - 实际消耗在 pipeline 结束后 `costBudget.spend(actualTokens)`
+  - 凌晨 00:00 自动 reset
+- `src/evolution/types.ts` — `L3PromptEntry.provenance` 增强 (NEW):
+  ```typescript
+  provenance: {
+    parentChain: string[];           // [grandparent_id, parent_id, current_id]
+    diff: string;                    // unified diff
+    decisionRationale: {             // 为什么接受这次修改
+      evalDecisionPass: number;      // Decision Set delta
+      evalMonitorPass: number;       // Monitor Set delta
+      satisfactionScore: number;     // 当时的满意度
+      goalDriftScore: number;        // Goal Drift Index
+      diagnosticConfidence: number;  // DiagnosticLLM 置信度
+      ruleValidatorL2Score: number;  // RuleValidator L2 评分
+    };
+    rolledBackFrom?: string;         // 如果被回滚,指向触发回滚的 entry
+  }
+  ```
 - 替换走 `git apply --check` 先 dry-run,通过才真 apply
 - 7 天观察期:每次跑 eval-runner 都覆盖 active prompt,失败立即回滚
 - CLI 暴露 `./cli prompt revert <id>` 人工回滚入口
@@ -328,6 +386,24 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 - WHEN write
 - THEN 抛 `L3WriteDeniedError`,写 `l3.manual_write_denied_total` +1
 - AND 走 `--force` 标志时打审计 `l3.manual_write` 进 audit
+
+**Scenario: CostBudget 超限跳过本轮 (NEW)**
+- GIVEN 今日已消耗 480K tokens,每日预算 500K
+- WHEN EvolutionService.runOnce 预估本轮需 80K tokens
+- THEN `CostBudgetManager.check(80000)` 返回 false
+- AND runOnce 返回 `{ skipped: true, reason: 'budget_exceeded' }`
+- AND 写 `evolution.token_budget_exceeded_total` +1
+- AND log warn "Evolution skipped: daily token budget exceeded (480K/500K)"
+- AND 不执行 insight pipeline
+
+**Scenario: ProvenanceChain 完整溯源 (NEW)**
+- GIVEN prompt prm-001 经过 2 次进化: prm-001 → prm-002 → prm-003
+- WHEN 查询 prm-003 的 provenance
+- THEN `parentChain = ["prm-001", "prm-002", "prm-003"]`
+- AND `decisionRationale` 包含每次进化的 eval 分数 / satisfaction / goalDrift 快照
+- AND `diff` 可还原每次改了什么
+- AND 若 prm-003 被回滚,`rolledBackFrom` 指向触发回滚的 entry
+- AND 审计日志可追溯完整的"谁 → 为什么 → 结果如何"链路
 
 ## CAP-EVO-05 (NEW) Evolution Service 自动熔断机制
 
@@ -461,15 +537,18 @@ v0.10.0 已有 audit.log 记录所有失败 trace,但缺人/AI 复盘机制;本 
 **Then** 单次模式: 跑完整 runOnce,产出 summary 报告到 stdout
 **And** 持续模式: 6h 周期 + SIGTERM 优雅退出(完当前 cycle 才退)
 **And** metric 持续上报:
-  - `evolution.insights_produced_total` / `evolution.diagnostics_run_total` / `evolution.diagnostics_validated_total` / `evolution.diagnostics_rejected_total`
+  - `evolution.insights_produced_total` / `evolution.positive_insights_total` (NEW) / `evolution.diagnostics_run_total` / `evolution.diagnostics_validated_total` / `evolution.diagnostics_rejected_total`
+  - `evolution.diagnostics_with_reasoning_total` (NEW) / `evolution.goal_drift_detected_total` (NEW) / `evolution.goal_drift_blocked_total` (NEW)
   - `evolution.decision_set_pass_rate` / `evolution.monitor_set_pass_rate` / `evolution.capability_drift_alerts_total`
   - `evolution.prompts_evolved_total` / `evolution.prompts_rejected_total` / `evolution.prompts_rejected_by_drift_total`
   - `evolution.circuit_breaker.state` / `evolution.skipped_circuit_open`
   - `evolution.user_satisfaction_score` / `evolution.user_feedback_total`
   - `evolution.rollbacks_total`
-**And** Grafana panel "Evolution Pipeline (v0.11.0)" 展示关键 metric + 熔断器状态 + 用户满意度趋势
+  - `evolution.token_spent_total` (NEW) / `evolution.token_budget_exceeded_total` (NEW) / `evolution.daily_token_budget` (NEW, gauge)
+  - `evolution.provenance_chain_depth` (NEW, gauge) / `evolution.success_pattern_adopted_total` (NEW)
+**And** Grafana panel "Evolution Pipeline (v0.11.0)" 展示关键 metric + 熔断器状态 + 用户满意度趋势 + token 预算剩余
 
 **实现要点:**
-- 复用 v0.10.0 metrics.ts,加 ~15 个新 counter/gauge
+- 复用 v0.10.0 metrics.ts,加 ~25 个新 counter/gauge (含 10 个 NEW)
 - ops/grafana/dev-brain-dashboard.json 加 panel #18 "Evolution Pipeline (v0.11.0)"
 - 文档: docs/evolution.md (新) 解释整套流程 + 博弈论设计原理 + 回滚指南

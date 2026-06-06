@@ -47,18 +47,20 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 
 **Phase E — 自我进化闭环 (P0, 2 周) → "AI 驱动 AI" 核心**
 
-> **v0.11.0 修订**: 经工程评审 + 博弈论审查,在原有设计基础上增加: CAP-EVO-02 全量双轨 RuleValidator 替代单模型置信度阈值、CAP-EVO-03 A/B Split 替代固定 eval suite、CAP-EVO-05 自动熔断机制、CAP-EVO-06 用户反馈信号集成。详见 `review/ai-native-os-review.md` 和相关辩证讨论。
+> **v0.11.0 修订 1**: 经工程评审 + 博弈论审查,在原有设计基础上增加: CAP-EVO-02 全量双轨 RuleValidator 替代单模型置信度阈值、CAP-EVO-03 A/B Split 替代固定 eval suite、CAP-EVO-05 自动熔断机制、CAP-EVO-06 用户反馈信号集成。
+> **v0.11.0 修订 2**: 经行业调研 (DSPy / GReaTer / SAHOO / DGM),增加 5 项增量增强: CAP-EVO-01 成功模式挖掘、CAP-EVO-02 RV-5 Goal Drift Index + Reasoning Trace、CAP-EVO-04 CostBudget + ProvenanceChain。详见 `specs/self-evolution/design.md`。
 
-21. `src/evolution/insight-engine.ts` — 周期任务: 拉 D 的 snapshot + 失败 trace,聚合成"问题候选"列表(分类: context/spec/prompt/agent-stability)
-22. `src/evolution/diagnostic-llm.ts` — 复用 DeepSeek,分离式两阶段调用: diagnose → RuleValidator (全量双轨) → suggestFix (仅被采纳后)
-23. `src/evolution/rule-validator.ts` — 确定性规则验证引擎: Level 1 门槛 (rootCause 可查证/fix 一致性/confidence 合理/diff 可应用) + Level 2 加分 (spec 引用/量化指标/模式匹配/路径过滤)
+21. `src/evolution/insight-engine.ts` — 周期任务: 拉 D 的 snapshot + 失败 trace + **成功 trace** (NEW),聚合成"问题候选"列表(分类: context/spec/prompt/agent-stability) + 成功模式提取
+22. `src/evolution/diagnostic-llm.ts` — 复用 DeepSeek,分离式两阶段调用: diagnose (含 Agent Reasoning Trace 辅助 evidence) → RuleValidator (全量双轨 + RV-5 Goal Drift Index) → suggestFix (仅被采纳后)
+23. `src/evolution/rule-validator.ts` — 确定性规则验证引擎: Level 1 5 条门槛 (含 RV-5 Goal Drift Index: DGM 案例防护) + Level 2 加分 (spec 引用/量化指标/模式匹配/路径过滤)
 24. `src/evolution/eval-runner.ts` — A/B Split: 从 100+ 任务池随机抽取 20 个 (Decision 5 + Monitor 15),Monitor Set 结果对 Evolution Service 不可见,每 2 周轮换任务池
 25. `src/evolution/task-pool.ts` — 管理 100+ 任务池,随机抽取,定期轮换,外部注入
-26. `src/evolution/evolution-service.ts` — orchestrator: 定时跑 insight → diagnostic → RuleValidator → eval → 用户反馈检查 → 熔断前置检查 → 替换 → 落 L3
-27. `src/evolution/circuit-breaker.ts` — 三态熔断器 (closed/open/half-open): 连续 reject / 连续回滚 / 用户持续不满 / 能力退化 触发自动暂停
-28. `src/evolution/feedback-collector.ts` — 飞书卡片 thumbs up/down 反馈采集 + 7 天滚动 satisfaction_score
-29. `src/evolution/l3-memory.ts` — 长期偏好记忆存储: `~/.dev-brain/l3-memory/`,只接受 evolution-service 写入
-30. 新增 metric: evolution 全系列 (~15 个 counter/gauge,含 circuit_breaker.state / satisfaction_score / a/b pass_rate 等)
+26. `src/evolution/evolution-service.ts` — orchestrator: 前置检查 (熔断 + CostBudget) → insight → diagnostic → RuleValidator → eval → 用户反馈检查 → goalDrift 检查 → 替换 → 落 L3 (含 ProvenanceChain)
+27. `src/evolution/cost-budget.ts` — **NEW**: 每日 token 预算管理 (默认 500K),超限跳过本轮,凌晨自动重置
+28. `src/evolution/circuit-breaker.ts` — 三态熔断器 (closed/open/half-open): 连续 reject / 连续回滚 / 用户持续不满 / 能力退化 触发自动暂停
+29. `src/evolution/feedback-collector.ts` — 飞书卡片 thumbs up/down 反馈采集 + 7 天滚动 satisfaction_score
+30. `src/evolution/l3-memory.ts` — 长期偏好记忆存储: `~/.dev-brain/l3-memory/`,只接受 evolution-service 写入,含完整 ProvenanceChain (parentChain + diff + decisionRationale)
+31. 新增 metric: evolution 全系列 (~25 个 counter/gauge,含 circuit_breaker.state / satisfaction_score / a/b pass_rate / goal_drift / token_budget / provenance_chain_depth 等)
 
 **Phase F — 通信/上下文/多 Agent 增强 (P1, 2 周) → UX 与鲁棒性**
 
@@ -157,11 +159,11 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 - `tests/unit/code-health/*.test.ts` (~28 场景)
 
 **新增 (Phase E)**:
-- `src/evolution/{insight-engine,diagnostic-llm,rule-validator,eval-runner,task-pool,evolution-service,circuit-breaker,feedback-collector,l3-memory}.ts`
-- `src/evolution/types.ts` — Insight / Diagnostic / EvalResult / EvolutionRun / Attribution / L1FailureTrace 类型定义
+- `src/evolution/{insight-engine,diagnostic-llm,rule-validator,eval-runner,task-pool,evolution-service,cost-budget,circuit-breaker,feedback-collector,l3-memory}.ts`
+- `src/evolution/types.ts` — Insight / Diagnostic / Fix / ValidationResult / L2Score / EvalResult / EvalReport / EvolutionRun / RunSummary / L1FailureTrace (含 agentReasoning) / Attribution / CostBudget / L3PromptEntry (含 provenance) 类型定义
 - `config/rule-validator.yaml` — RuleValidator Level 2 规则配置
-- `tests/eval/pool/*.yaml` — 100+ 任务池
-- `tests/unit/evolution/*.test.ts`
+- `tests/eval/pool/*.yaml` — 100+ 任务池 (固化/对抗性/用户任务)
+- `tests/unit/evolution/*.test.ts` (~10 测试文件, ~45 场景)
 - `tests/integration/evolution-e2e.test.ts`
 
 **新增 (Phase F)**:
@@ -171,7 +173,7 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 - `tests/unit/{gateway,context,runtime}/*.test.ts` (~25 runtime 场景)
 
 **修改**:
-- `src/observability/metrics.ts` — 加 ~30 新 metric (8 code + ~10 evolution + ~10 context + ~2 runtime checkpoint/sandbox)
+- `src/observability/metrics.ts` — 加 ~40 新 metric (8 code + ~25 evolution + ~10 context + ~2 runtime checkpoint/sandbox)
 - `src/context/compressor.ts` — 移除 (功能合并到 SleeptimeContextAgent)
 - `ops/grafana/dev-brain-dashboard.json` — 加 2 panel
 - `src/brain/brain-engine.ts` — 接入 recall-strategy, inject-plan, evolution-service, acceptance-pipeline
