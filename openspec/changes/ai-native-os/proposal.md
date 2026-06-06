@@ -58,11 +58,15 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 
 **Phase F — 通信/上下文/多 Agent 增强 (P1, 2 周) → UX 与鲁棒性**
 
-27. **通信层 (CAP-COM-01..04)**:
-    - `src/gateway/streaming-pusher.ts` — 流式推送 LLM 思考到飞书卡片(节流 200ms)
+27. **通信层 (CAP-COM-01..05)**:
+    - `src/gateway/streaming-pusher.ts` — 结构化事件流推送 (替代无类型文本流)
+    - `src/gateway/card-renderer.ts` — 事件 → 飞书卡片区域映射 + 层级可见性控制
+    - `src/gateway/event-bus.ts` — CommunicationEvent 事件总线
     - `src/gateway/signature-verifier.ts` — 验证 lark-cli 回调 HMAC-SHA256 签名
     - `src/gateway/multimodal-parser.ts` — 解析图片(OCR via MiniMax vision)/文件附件/消息中的 PR 链接
-    - `src/gateway/task-done-card.ts` — 任务完成卡: 变更摘要 + 测试结果 + 文档链接
+    - `src/gateway/task-done-card.ts` — 阶段总结 + 任务完成卡
+    - `src/gateway/agent-identity.ts` — 多 Agent 身份注册表 (区分 Claude/Codex/DeepSeek/子Agent)
+    - `src/gateway/types.ts` — CommunicationEvent / CardZone 类型定义
 28. **上下文引擎 (CAP-CTX-01..04)**:
     - `src/context/l1-working-memory.ts` — 单次任务内的临时变量,带 scope 隔离 (tool_call/step/subtask)
     - `src/context/l2-task-memory.ts` — 任务级记忆,结构化 Entry (8 种 type + importance + TTL + specRef),复合评分 recall
@@ -73,13 +77,14 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
     - `src/context/scorer.ts` — TF-IDF + 复合评分实现
     - `src/context/ttl-manager.ts` — TTL 过期管理
     - `src/context/inject-plan.ts` — token 预算分配 + 优先级注入 (80K 总预算, recall ≤4K)
-29. **多 Agent 运行时 (CAP-MAR-01..05)**:
+29. **多 Agent 运行时 (CAP-MAR-01..05)** — **v0.11.0 修订**: 经 LangGraph 1.0 / 事务性快照 / Wink 自干预 行业调研增强:
     - `src/runtime/state-machine.ts` — 显式 FSM: PENDING → RUNNING → SUCCESS/FAILED/RETRYING,带非法迁移检测
-    - `src/runtime/sandbox.ts` — workDir 快照(git stash)→ 沙箱执行 → 失败回滚, 接口增加 guarantee 等级标注 (ATOMIC/BEST_EFFORT/NO_ROLLBACK)
-    - `src/runtime/heartbeat.ts` — adapter 每 30s 报心跳,2 个心跳缺失即 cancel
-    - `src/runtime/self-correction.ts` — **修订**: L1 归因 + 分流决策 (偶发→修复路径 / 系统→进化路径 / 不可归因→待观察)
-    - `src/runtime/attribution-engine.ts` — 基于 L1 可信源 (git diff / acceptance 结果 / heartbeat) 做失败归因,不依赖 Agent 自述
-    - `src/runtime/acceptance-pipeline.ts` — 派发后自动跑 unit test + lint + reviewer agent
+    - `src/runtime/checkpoint-store.ts` — **NEW**: JSON 文件持久化,每次 transition 异步写 checkpoint,crash 可恢复
+    - `src/runtime/sandbox.ts` — **修订**: PreFlight 校验 + 双路径回滚 (stash pop → git reset --hard 兜底) + guarantee 等级 (ATOMIC/BEST_EFFORT/NO_ROLLBACK)
+    - `src/runtime/heartbeat.ts` — **修订**: 结构化心跳 (phase/progressPct/currentTool) + 停滞检测 (连续 3 次无进展),与 communication-layer 联动推送 ProgressEvent
+    - `src/runtime/self-correction.ts` — **修订**: L1 归因 + Wink 3 类 misbehavior 分类 (specification_drift/reasoning_problem/tool_call_failure) + 分流决策 (偶发→修复路径 / 系统→进化路径 / 不可归因→待观察)
+    - `src/runtime/attribution-engine.ts` — 基于 L1 可信源 (git diff / acceptance 结果 / heartbeat) 做失败归因,不依赖 Agent 自述; Wink 分类作为辅助语义层
+    - `src/runtime/acceptance-pipeline.ts` — **修订**: 分层验收金字塔 FastGate (lint+typecheck < 30s) → CoreGate (unit test < 2min) → ReviewGate (reviewer agent, 非阻塞 advisory)
 
 **Non-Goals (本 change 不做)**
 
@@ -155,10 +160,10 @@ dev-brain v0.10.0 (spec-driven-workflow) 已实现"飞书收需求 → 意图分
 - `tests/integration/evolution-e2e.test.ts`
 
 **新增 (Phase F)**:
-- `src/gateway/{streaming-pusher,signature-verifier,multimodal-parser,task-done-card}.ts`
+- `src/gateway/{streaming-pusher,card-renderer,event-bus,signature-verifier,multimodal-parser,task-done-card,agent-identity,types}.ts`
 - `src/context/{l1-working-memory,l2-task-memory,l3-long-term-memory,recall-strategy,sleeptime-agent,types,scorer,ttl-manager,inject-plan}.ts`
-- `src/runtime/{state-machine,sandbox,heartbeat,self-correction,attribution-engine,acceptance-pipeline}.ts`
-- `tests/unit/{gateway,context,runtime}/*.test.ts`
+- `src/runtime/{types,state-machine,checkpoint-store,sandbox,heartbeat,self-correction,attribution-engine,acceptance-pipeline}.ts`
+- `tests/unit/{gateway,context,runtime}/*.test.ts` (~25 runtime 场景)
 
 **修改**:
 - `src/observability/metrics.ts` — 加 ~20 新 metric (4 code + ~10 evolution + ~10 context)

@@ -216,46 +216,14 @@ target-version: v0.11.0
 > **目标:** 通信层流式 + 鉴权 + 多模态; 上下文 L1/L2/L3 分层 + recall; 多 Agent FSM + 沙箱 + 心跳 + self-correction + 验收。
 > 3 个并行子 phase, 各 ~5 天。
 
-### F.1 通信层 (CAP-COM-01..04)
+### F.1 通信层 (CAP-COM-01..05)
 
-#### F.1.a StreamingPusher (CAP-COM-01)
-
-- [ ] `src/gateway/streaming-pusher.ts` — 单例,持 `Map<planMessageId, Buffer>`
-- [ ] 节流 200ms,合并相邻内容
-- [ ] 卡片用 `updateCard` 而非 `sendCard`
-- [ ] 飞书 API 4xx/5xx backoff 500ms 重试 1 次
-- [ ] 写 `gateway.streaming.push_failed_total`
-- [ ] 任务结束 state="done" 一次性 flush
-- [ ] 单测 `tests/unit/gateway/streaming-pusher.test.ts`: 4 场景 (节流合并/失败重试/flush/超时)
-
-#### F.1.b SignatureVerifier (CAP-COM-02)
-
-- [ ] `src/gateway/signature-verifier.ts` — HMAC-SHA256,常时间比较
-- [ ] secret 优先级: env `DEV_BRAIN_FEISHU_VERIFICATION_TOKEN` > `~/.dev-brain/secret` > fail-fast
-- [ ] daemon 启动时 secret 缺失立即 exit 2
-- [ ] 写 `gateway.signature.verified_total` / `gateway.signature.rejected_total`
-- [ ] 强制化: v0.9.0 已有 URL 验签,本 spec 把 card.action 等回调也强制化
-- [ ] 单测 `tests/unit/gateway/signature-verifier.test.ts`: 4 场景
-
-#### F.1.c MultimodalParser (CAP-COM-03)
-
-- [ ] `src/gateway/multimodal-parser.ts` — 3 子 parser: image OCR / file download / PR link
-- [ ] MiniMax vision 走 native 通道 (复用 v0.8.0 backend)
-- [ ] GitHub 链接走 `gh pr view` 子进程
-- [ ] 附件落 `~/.dev-brain/attachments/`,不污染 workDir
-- [ ] OCR 置信度 < 0.7 标 `ocr_low_confidence: true`
-- [ ] 整链路 trace_id 贯穿
-- [ ] 单测 `tests/unit/gateway/multimodal-parser.test.ts`: 4 场景 (图片/文件/PR/低置信度)
-
-#### F.1.d TaskDoneCard (CAP-COM-04)
-
-- [ ] `src/gateway/task-done-card.ts` — `buildTaskDoneCard(task, artifacts): Card`
-- [ ] 6 字段: summary / changes / tests / artifacts / trace_id (+ 1 状态色)
-- [ ] changes 从 `git diff --stat HEAD~1 HEAD` 拿
-- [ ] 长输出 (> 28KB) 走 `card-degrader` 三段降级 (v0.9.0 已有)
-- [ ] 失败时 summary 含可读错误摘要 (从 stderr 抽关键行)
-- [ ] 原地 update 而非 send
-- [ ] 单测 `tests/unit/gateway/task-done-card.test.ts`: 3 场景 (success/fail/长输出)
+> 详细任务见 `specs/communication-layer/tasks.md`。核心交付:
+> - 结构化事件流 (5 种 CommunicationEvent) + CardKit v2.0 流式卡片
+> - 层级可见性 (Header/Content/Collapse 三层)
+> - 阶段总结 (5 个阶段 Summary) + 多 Agent 身份区分
+> - 签名鉴权 + 多模态 (基本不变)
+> - 新增 ~8 测试文件 (~28 场景)
 
 ### F.2 上下文引擎 (CAP-CTX-01..04)
 
@@ -269,73 +237,20 @@ target-version: v0.11.0
 
 ### F.3 多 Agent 运行时 (CAP-MAR-01..05)
 
-#### F.3.a StateMachine (CAP-MAR-01)
-
-- [ ] `src/runtime/state-machine.ts` — `class SubtaskStateMachine { transition(); canTransition() }`
-- [ ] 状态: `pending | running | retrying | success | failed | cancelled` (discriminated union)
-- [ ] 6 个 ALLOWED 迁移边
-- [ ] 非法迁移抛 `IllegalStateTransitionError`
-- [ ] 写 `runtime.subtask.state_transition_total{from,to}` / `runtime.subtask.illegal_transition_total{from,to}`
-- [ ] 持久化:每次 transition 写 checkpoint
-- [ ] 替换 v0.10.0 orchestrator.ts 里散落的 `if (status === "running") ...`
-- [ ] 单测 `tests/unit/runtime/state-machine.test.ts`: 5 场景 (正常/重试/非法/取消/重置)
-
-#### F.3.b SandboxManager (CAP-MAR-02)
-
-- [ ] `src/runtime/sandbox.ts` — `class SandboxManager { enter(); exit(); rollback() }`
-- [ ] 执行前 `git stash push -u -m "sandbox-<taskId>"`
-- [ ] 执行中 cwd=workDir,git status 监控 diff
-- [ ] 成功 exit: 保留 commit/stash
-- [ ] 失败 exit: `git checkout -- .` + `git clean -fd` + `git stash pop`
-- [ ] 冲突时 reject 派发,任务 FAILED
-- [ ] 写 `runtime.sandbox.rollback_total`
-- [ ] 与 checkpoint 联动
-- [ ] 单测 `tests/unit/runtime/sandbox.test.ts`: 4 场景 (成功提交/失败回滚/冲突拒绝/无修改)
-
-#### F.3.c HeartbeatWatcher (CAP-MAR-03)
-
-- [ ] `src/runtime/heartbeat.ts` — `class HeartbeatWatcher { start(); stop() }`
-- [ ] 解析 `__dev_brain_heartbeat__ <progress>50</progress>` token
-- [ ] 连续 2 个周期 (>60s) 未更新 → cancel + 标 FAILED
-- [ ] 阈值 env `DEV_BRAIN_HEARTBEAT_MISSES` 可调
-- [ ] 写 `runtime.heartbeat.received_total` / `runtime.heartbeat.lost_total`
-- [ ] adapter 包装层解析 stdout
-- [ ] 单测 `tests/unit/runtime/heartbeat.test.ts`: 4 场景 (正常/丢失/自定义阈值/无 token)
-
-#### F.3.d SelfCorrector + AttributionEngine (CAP-MAR-04)
-
-- [ ] `src/runtime/attribution-engine.ts` — `class AttributionEngine { analyze(trace: L1FailureTrace): Attribution }`
-- [ ] L1 可信源 5 字段: specRef / gitDiff / acceptance / heartbeat / sandbox
-- [ ] 归因规则: missing_test / spec_violation / timeout / lint_error / type_error / unattributable
-- [ ] 与 CAP-EVO-01 联动: attribution 数据作为 insight-engine 的第四类输入
-- [ ] 单测 `tests/unit/runtime/attribution-engine.test.ts`: 4 场景
-
-- [ ] `src/runtime/self-correction.ts` — `class SelfCorrector { attribute(); triage(); correct() }`
-- [ ] 3 步流程: Step 1 归因 (attribution-engine) → Step 2 分流 (修复/进化/升级) → Step 3 修复执行 (仅修复路径)
-- [ ] 修复路径: 偶发失败 (hf < 5%) → 重写 prompt + 重试,最多 2 次
-- [ ] 进化路径: 系统失败 (hf ≥ 5%) → 产出 Insight 进 Evolution Pipeline,不自动重试
-- [ ] 升级路径: 不可恢复 (401) / 能力边界 → 升级用户
-- [ ] unattributable → 待观察队列,积累 ≥ 5 条同 pattern 重新归因
-- [ ] 写 `runtime.self_correction.triage_total{path}` / `runtime.self_correction.unattributable_queue_size`
-- [ ] 单测 `tests/unit/runtime/self-correction.test.ts`: 5 场景 (修复/进化/升级/unattributable/N 次上限)
-
-#### F.3.e AcceptancePipeline (CAP-MAR-05)
-
-- [ ] `src/runtime/acceptance-pipeline.ts` — 4 阶段: unit test / lint / typecheck / reviewer agent
-- [ ] 任一失败 → subtask FAILED with reason
-- [ ] 全过 → SUCCESS,触发 TaskDoneCard (CAP-COM-04)
-- [ ] 复用 HeartbeatWatcher 监控 acceptance 子进程
-- [ ] Reviewer agent 走 v0.8.0 native backend
-- [ ] 写 `runtime.acceptance.{stage}_total{result}`
-- [ ] 5min timeout
-- [ ] 单测 `tests/unit/runtime/acceptance-pipeline.test.ts`: 4 场景
+> 详细任务见 `specs/multi-agent-runtime/tasks.md`。核心交付:
+> - StateMachine + CheckpointStore (JSON 持久化, crash 可恢复) — CAP-MAR-01
+> - 双保险沙箱 (PreFlight 校验 + 双路径回滚: stash pop → git reset --hard 兜底) + SandboxGuarantee 等级 — CAP-MAR-02
+> - 结构化心跳 (phase/progressPct/currentTool) + 停滞检测 + ProgressEvent 联动 — CAP-MAR-03
+> - L1 归因 + Wink 3 类 misbehavior 双层分类 + 分流决策 (修复/进化/升级) — CAP-MAR-04
+> - 分层验收金字塔 (FastGate → CoreGate → ReviewGate 非阻塞) — CAP-MAR-05
+> - 新增 ~25 测试场景 (~8 测试文件)
 
 ### F.4 集成到 brain-engine
 
 - [ ] `src/brain/brain-engine.ts` — 接入 recall-strategy + inject-plan (见 `specs/context-engine/tasks.md` 集成部分) + evolution-service (E.5) + acceptance-pipeline (F.3.e)
 - [ ] `src/context/context-budget.ts` (v0.10.0) — `maybeSummarise()` 优先走 Sleeptime Agent (T3),不可用时退到原有 summarise 逻辑; 超 80K 硬上限走 T4 前台兜底
 - [ ] `src/runtime/orchestrator.ts` — 替换 ad-hoc retry 为 state-machine (F.3.a) + self-correction (F.3.d)
-- [ ] `src/gateway/feishu-gateway.ts` — 接入 streaming-pusher (F.1.a) + signature-verifier (F.1.b) + multimodal-parser (F.1.c) + task-done-card (F.1.d)
+- [ ] `src/gateway/feishu-gateway.ts` — 接入 CardKit v2.0 流式卡片 + EventBus (见 `specs/communication-layer/tasks.md` 集成部分)
 - [ ] 集成测试 `tests/integration/full-loop.test.ts`: 飞书消息 → 多模态 → debate → OpenSpec → 子任务 (含 self-correction) → 验收 → 完成卡
 
 ### F.5 验证
