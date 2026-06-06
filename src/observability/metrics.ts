@@ -85,6 +85,9 @@ const COUNTER_HELP: Readonly<Record<string, string>> = {
   "runtime.retry_total":
     "Total retry-policy retries attempted (success+exhausted)",
   "runtime.resume_total": "Total ResumeManager.scan() resume plans produced",
+  // v0.10.0 Phase B.2 — instruction-following audit
+  "instruction.rules_applied_total": "Total rule-application events recorded",
+  "instruction.rules_violated_total": "Total rule-violation events recorded",
 };
 
 const GAUGE_HELP: Readonly<Record<string, string>> = {
