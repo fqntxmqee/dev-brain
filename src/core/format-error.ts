@@ -17,16 +17,14 @@ const ERROR_EMOJI: Record<string, string> = {
   LOCK_CONFLICT: "🔒",
   TASK_NOT_FOUND: "🔍",
   TASK_QUEUE_FULL: "🚦",
-  BRIDGE_TIMEOUT: "⏱",
-  BRIDGE_PROTOCOL: "🛑",
   CREDENTIAL_EXPIRED: "🔑",
 };
 
 const NEXT_STEP_HINTS: Record<string, string> = {
   UNAUTHORIZED: "设置 DEV_BRAIN_ALLOW_FROM=<你的 open_id>（测试期可设 *=*）",
   CONFIG_ERROR: "运行 `dev-brain doctor` 查看详情",
-  ADAPTER_ERROR: "查看 stderr 日志；检查 cc-connect daemon 状态",
-  PROTOCOL_ERROR: "升级 cc-connect 客户端；检查网络",
+  ADAPTER_ERROR: "查看 stderr 日志；检查本地 CLI / API key 配置",
+  PROTOCOL_ERROR: "检查 lark-cli 版本 / 网络",
   GATEWAY_ERROR: "重启 `dev-brain start`",
   PLAN_ERROR: "重新 /cancel 再发新需求",
   AUTH_ERROR: "更新 .env 飞书凭证",
@@ -35,8 +33,6 @@ const NEXT_STEP_HINTS: Record<string, string> = {
   LOCK_CONFLICT: "等占用方释放，或 /cancel 重排",
   TASK_NOT_FOUND: "确认 taskId；/list 查看最近任务",
   TASK_QUEUE_FULL: "先 /cancel 旧任务再发新需求",
-  BRIDGE_TIMEOUT: "检查 cc-connect daemon；/doctor 看 bridge 状态",
-  BRIDGE_PROTOCOL: "升级 cc-connect 至最新",
   CREDENTIAL_EXPIRED:
     "登录 https://open.feishu.cn/app 轮换 App Secret 后更新 .env",
 };

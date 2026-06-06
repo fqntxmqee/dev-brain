@@ -31,7 +31,7 @@ const program = new Command();
 program
   .name("dev-brain")
   .description("飞书指挥的多 Agent 开发大脑")
-  .version("0.4.0");
+  .version("0.9.0");
 
 program
   .command("start")
@@ -56,6 +56,7 @@ program
               `- agentBackend: ${config.agentBackend} (v0.8.0 — 直接 spawn 本地 CLI)`,
               `- claude: ${config.claudeBin} (model=${config.claudeModel}, base=${config.claudeBaseUrl})`,
               `- codex: ${config.codexBin} (model=${config.codexModel}, profile=${config.codexProfile})`,
+              `- cursor: ${config.cursorBin} (model=${config.cursorModel}, mode=${config.cursorMode})`,
             ].join("\n")
           : `- agentBackend: ${config.agentBackend} (v0.7.0 兼容 — UDS 派发)`;
       process.stdout.write(
@@ -64,8 +65,6 @@ program
           `- workDir: ${config.workDir}`,
           `- adapterMode: ${config.adapterMode}`,
           nativeLine,
-          `- ccSyncMode: ${config.ccSyncMode}`,
-          `- ccConnectSocket: ${config.ccConnectSocket}`,
           `- allowFrom: ${config.allowFrom.size ? [...config.allowFrom].join(", ") : "(all)"}`,
           `- metrics: ${config.metricsEnabled ? `${config.metricsHost || deriveMetricsHost()}:${config.metricsPort}` : "disabled"}`,
           "",
@@ -79,15 +78,9 @@ program
     const app = createDevBrainApp(reporter);
 
     // 启动前预检：必过项失败立即退出 2
-    // v0.8.0: native backend 下 cc-connect 仅作 cursor fallback 可选，
-    // cc_connect_headless 不再阻塞启动（用户保留三 Bot 配置不影响派发）
+    // v0.9.0+: doctor 只看 native CLI / API key / feishu 凭证,不再检查 cc-connect
     const checks = await runDoctorChecks(config);
-    const skipOnNative = new Set(["cursor_api_key", "cc_connect_headless"]);
-    const fatal = checks.filter(
-      (c) =>
-        !c.ok &&
-        !(config.agentBackend === "native" && skipOnNative.has(c.name)),
-    );
+    const fatal = checks.filter((c) => !c.ok);
     if (fatal.length > 0) {
       process.stderr.write(`${formatDoctorReport(checks)}\n`);
       process.stderr.write(
@@ -230,7 +223,7 @@ program
 
 program
   .command("doctor")
-  .description("环境自检：cc-connect / Cursor / 飞书凭证")
+  .description("环境自检：本地 CLI / API key / 飞书凭证")
   .action(async () => {
     const config = loadConfig();
     const checks = await runDoctorChecks(config);

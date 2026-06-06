@@ -10,10 +10,11 @@ vi.mock("@cursor/sdk", () => ({
 }));
 
 import {
+  CC_CONNECT_FACTORIES,
   ClaudeCodeAdapter,
   CodexAdapter,
-} from "../../src/adapters/claude-code-adapter.js";
-import { CursorAdapter } from "../../src/adapters/cursor-adapter.js";
+  CursorAdapter,
+} from "../../src/adapters/cc-connect/legacy.js";
 import { LocalCursorAdapter } from "../../src/adapters/local-cursor-adapter.js";
 import { CcConnectClient } from "../../src/adapters/cc-connect/index.js";
 import { AdapterRegistry } from "../../src/adapters/adapter-registry.js";
@@ -227,10 +228,25 @@ describe("AdapterRegistry backend routing (v0.8.0)", () => {
     expect(registry.get("cursor")).toBeInstanceOf(LocalCursorAdapter);
   });
 
-  it("cc_connect_backend_uses_cc_connect_adapters", () => {
+  it("cc_connect_backend_defaults_to_native_and_warns", () => {
+    // v0.9.0+: agentBackend=cc-connect no longer auto-routes to legacy
+    // adapters. Users opting into v0.7.0 behavior must pass CC_CONNECT_FACTORIES
+    // explicitly; default path is now native.
     const config = makeStubConfig({ agentBackend: "cc-connect" });
+    const registry = AdapterRegistry.create(config);
+    expect(registry.get("claude-code")).toBeInstanceOf(LocalClaudeCodeAdapter);
+    expect(registry.get("codex")).toBeInstanceOf(LocalCodexAdapter);
+    expect(registry.get("cursor")).toBeInstanceOf(LocalCursorAdapter);
+  });
+
+  it("cc_connect_factories_explicit_override_uses_legacy_adapters", () => {
+    const config = makeStubConfig({ agentBackend: "native" });
     const client = makeStubClient(config);
-    const registry = AdapterRegistry.create(config, client);
+    const registry = AdapterRegistry.create(
+      config,
+      client,
+      CC_CONNECT_FACTORIES,
+    );
     expect(registry.get("claude-code")).toBeInstanceOf(ClaudeCodeAdapter);
     expect(registry.get("codex")).toBeInstanceOf(CodexAdapter);
     expect(registry.get("cursor")).toBeInstanceOf(CursorAdapter);

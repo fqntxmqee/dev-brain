@@ -103,8 +103,6 @@ describe("FeishuGateway planMessageId flow (T-91)", () => {
     expect(reporter.cards).toHaveLength(1);
     const sentCard = reporter.cards[0];
     expect(sentCard).toBeDefined();
-    // InMemoryReporter 返回 om-mem-N;通过 planMessageId 跟踪后续 updateCard
-    const taskId = app.brain.findCompleted("") ? "x" : "x";
     // 直接验证 setPlanMessageId 被 Gateway 调用
     // 由于 create_plan 后立即 sendCard,我们读 InMemoryReporter 内部 seq
     expect(reporter.cards[0]?.card).toBeDefined();

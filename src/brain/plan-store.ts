@@ -1,6 +1,6 @@
 /**
  * 简单的 JSON 状态持久化。
- * 写入：~/.cc-connect/dev-brain-state.json
+ * 写入：~/.dev-brain/state.json
  * 字段：pendingByChat（待审批计划）、completed（已完成结果，最近 50 条）
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -19,7 +19,7 @@ export interface PlanStore {
   save(state: PersistedState): Promise<void>;
 }
 
-const DEFAULT_PATH = join(homedir(), ".cc-connect", "dev-brain-state.json");
+const DEFAULT_PATH = join(homedir(), ".dev-brain", "state.json");
 
 export class FilePlanStore implements PlanStore {
   constructor(private readonly path: string = DEFAULT_PATH) {}

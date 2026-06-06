@@ -1,5 +1,5 @@
 /**
- * 审计日志：append-only JSONL 文件，~/.cc-connect/dev-brain-audit.log
+ * 审计日志：append-only JSONL 文件，~/.dev-brain/audit.log
  * 记录敏感操作：鉴权拒绝 / 计划创建 / 批准 / 取消 / 任务完成
  *
  * 设计：append-only、不可改、含时间戳 + 事件名 + 上下文
@@ -33,7 +33,7 @@ export interface AuditLogger {
   emit(event: AuditEvent): Promise<void> | void;
 }
 
-const DEFAULT_PATH = join(homedir(), ".cc-connect", "dev-brain-audit.log");
+const DEFAULT_PATH = join(homedir(), ".dev-brain", "audit.log");
 
 export class FileAuditLogger implements AuditLogger {
   constructor(
