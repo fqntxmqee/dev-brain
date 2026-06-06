@@ -170,4 +170,34 @@ describe("InjectRules (CAP-INS-01 / Phase B.1)", () => {
     expect(r.appliedRules[0]?.estTokens).toBe(100);
     expect(r.totalTokens).toBe(100);
   });
+
+  it("appends_extra_sources_after_regular_sources", async () => {
+    await writeMd(join(home, ".claude", "CLAUDE.md"), "global-body");
+    const inj = new InjectRules({
+      workDir: work,
+      homeDir: home,
+      extraSources: async () => [
+        { relPath: "feedback/fb-1", content: "use 2 spaces" },
+      ],
+    });
+    const r = await inj.inject();
+    expect(r.appliedRules.map((x) => x.relPath)).toEqual([
+      "~/.claude/CLAUDE.md",
+      "feedback/fb-1",
+    ]);
+    expect(r.content).toContain("use 2 spaces");
+  });
+
+  it("skips_extra_sources_when_provider_throws", async () => {
+    await writeMd(join(home, ".claude", "CLAUDE.md"), "global-body");
+    const inj = new InjectRules({
+      workDir: work,
+      homeDir: home,
+      extraSources: async () => {
+        throw new Error("boom");
+      },
+    });
+    const r = await inj.inject();
+    expect(r.appliedRules).toHaveLength(1);
+  });
 });

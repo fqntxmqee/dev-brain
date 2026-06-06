@@ -88,6 +88,11 @@ const COUNTER_HELP: Readonly<Record<string, string>> = {
   // v0.10.0 Phase B.2 — instruction-following audit
   "instruction.rules_applied_total": "Total rule-application events recorded",
   "instruction.rules_violated_total": "Total rule-violation events recorded",
+  // v0.10.0 Phase B.3 — feedback memory
+  "instruction.feedback_recorded_total":
+    "Total user-correction feedback entries recorded",
+  "instruction.feedback_injected_total":
+    "Total feedback entries rendered into system prompt",
 };
 
 const GAUGE_HELP: Readonly<Record<string, string>> = {

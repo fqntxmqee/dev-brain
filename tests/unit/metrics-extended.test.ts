@@ -186,16 +186,16 @@ describe("MetricsRegistry — getMetricsText output format (v0.7.0)", () => {
     expect(r.getMetricsText().endsWith("\n")).toBe(true);
   });
 
-  it("output_count_matches_registered_count_55", () => {
+  it("output_count_matches_registered_count_57", () => {
     const r = new MetricsRegistry();
     r.registerAll();
     const text = r.getMetricsText();
-    // v0.10.0 Phase A.5 + B.2: 39 counters + 9 gauges + 7 histograms = 55 metric families
-    // (v0.9.0: 30+9+4=43; +7 Phase A.5 counters + 3 Phase A.5 histograms = +10;
-    //  +2 Phase B.2 counters = +2)
+    // v0.10.0 Phase A.5 + B.2 + B.3: 41 counters + 9 gauges + 7 histograms = 57 metric families
+    // (v0.9.0: 30+9+4=43; +7 Phase A.5 + 3 Phase A.5 = +10;
+    //  +2 Phase B.2 + 2 Phase B.3 = +4)
     // Each family has 1 # HELP + 1 # TYPE + ≥1 value lines
     const helpLines = text.split("\n").filter((l) => l.startsWith("# HELP "));
-    expect(helpLines.length).toBe(39 + 9 + 7);
+    expect(helpLines.length).toBe(41 + 9 + 7);
   });
 });
 

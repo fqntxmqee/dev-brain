@@ -55,6 +55,14 @@ export interface InjectRulesDeps {
   readonly projectRulesPrefix?: string;
   readonly homeClaudeMd?: string;
   readonly projectClaudeMd?: string;
+  /**
+   * 额外 source provider:返回若干 { relPath, content } 段(例如 feedback memory
+   * 渲染的修正条目),会被追加到常规 4-source 之后,参与 token 预算。
+   * 失败时静默跳过(不阻塞注入)。
+   */
+  readonly extraSources?: () => Promise<
+    ReadonlyArray<{ relPath: string; content: string }>
+  >;
 }
 
 const DEFAULT_TOKEN_BUDGET = 8_000;
@@ -88,7 +96,12 @@ export class InjectRules {
       deps.homeClaudeMd ?? join(this.homeDir, ".claude", "CLAUDE.md");
     this.projectClaudeMd =
       deps.projectClaudeMd ?? join(this.workDir, "CLAUDE.md");
+    this.extraSources = deps.extraSources;
   }
+
+  private readonly extraSources?: () => Promise<
+    ReadonlyArray<{ relPath: string; content: string }>
+  >;
 
   /**
    * 拉取最新规则并组装。命中缓存 → 直接返回。
@@ -140,9 +153,28 @@ export class InjectRules {
     const projectClaude = await this.tryRead(this.projectClaudeMd);
     if (projectClaude) out.push(projectClaude);
 
-    // 4. <workDir>/.claude/rules/**/*.md
+    // 4. <workDir>/.claude/rules 下所有 .md
     const projectRules = await this.listRules(this.projectRulesPrefix);
     out.push(...projectRules);
+
+    // 5. extra sources (e.g. feedback memory) — mtime 设为 now 强制重新评估
+    if (this.extraSources) {
+      try {
+        const extras = await this.extraSources();
+        const nowMs = Date.now();
+        for (const e of extras) {
+          out.push({
+            path: `<extra>:${e.relPath}`,
+            content: e.content,
+            mtimeMs: nowMs,
+          });
+        }
+      } catch (err) {
+        this.logger.warn("extra sources failed; skipping", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     return out;
   }
@@ -268,6 +300,7 @@ export class InjectRules {
     }
     if (absPath === this.homeClaudeMd) return "~/.claude/CLAUDE.md";
     if (absPath === this.projectClaudeMd) return "./CLAUDE.md";
+    if (absPath.startsWith("<extra>:")) return absPath.slice("<extra>:".length);
     return isAbsolute(absPath) ? absPath : absPath;
   }
 
