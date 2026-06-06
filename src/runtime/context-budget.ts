@@ -11,6 +11,7 @@
  */
 
 import { defaultLogger, type Logger } from "../core/logger.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import { ContextSummariseError } from "./types.js";
 
 export interface TokenUsage {
@@ -59,6 +60,7 @@ export class ContextBudget {
   private readonly summariser: Summariser;
   private readonly logger: Logger;
   private readonly now: () => Date;
+  private readonly metrics = getMetrics();
   private tokensUsed = 0;
   private lastSummariseAt: string | undefined;
   private summariseCount = 0;
@@ -119,6 +121,10 @@ export class ContextBudget {
       const out = await this.summariser.summarise(rounds, this.recentRounds);
       this.summariseCount += 1;
       this.lastSummariseAt = this.now().toISOString();
+      safe(
+        () => this.metrics.inc("runtime.context_budget_triggers"),
+        undefined,
+      );
       // 新 budget = 摘要 + 最近 N 轮
       const recentTokens = rounds
         .slice(-this.recentRounds)

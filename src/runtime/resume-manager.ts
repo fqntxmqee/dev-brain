@@ -14,6 +14,7 @@
  */
 
 import { defaultLogger, type Logger } from "../core/logger.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import { CheckpointManager } from "./checkpoint.js";
 import type { CheckpointSnapshot, SubTaskPlan } from "./types.js";
 
@@ -47,6 +48,7 @@ export class ResumeManager {
   private readonly logger: Logger;
   private readonly maxAgeSec: number;
   private readonly now: () => Date;
+  private readonly metrics = getMetrics();
 
   constructor(deps: ResumeManagerDeps) {
     this.checkpointManager = deps.checkpointManager;
@@ -97,6 +99,9 @@ export class ResumeManager {
       total_in_progress: snapshots.length,
       to_resume: plans.length,
     });
+    for (let i = 0; i < plans.length; i += 1) {
+      safe(() => this.metrics.inc("runtime.resume_total"), undefined);
+    }
     return plans;
   }
 

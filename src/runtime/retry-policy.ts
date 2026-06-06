@@ -22,6 +22,7 @@
 
 import { defaultLogger, type Logger } from "../core/logger.js";
 import { toErrorMessage } from "../core/error-utils.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import type { RetryAttempt } from "./types.js";
 import { SubTaskFailedError } from "./types.js";
 
@@ -53,6 +54,7 @@ export class RetryPolicy {
   private readonly baseMs: number;
   private readonly logger: Logger;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly metrics = getMetrics();
 
   constructor(deps: RetryPolicyDeps) {
     this.maxAttempts = Math.max(1, deps.maxAttempts);
@@ -82,6 +84,7 @@ export class RetryPolicy {
       const wait = attempt === 1 ? 0 : this.computeBackoff(attempt - 1);
       if (wait > 0) {
         if (ctx.onRetry) await ctx.onRetry(attempt, wait);
+        safe(() => this.metrics.inc("runtime.retry_total"), undefined);
         this.logger.info("retry waiting", {
           subtask_id: ctx.subtaskId,
           attempt,

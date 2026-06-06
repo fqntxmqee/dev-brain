@@ -14,6 +14,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { defaultLogger, type Logger } from "../core/logger.js";
+import { getMetrics, safe } from "../observability/metrics.js";
 import { CheckpointWriteError, type CheckpointSnapshot } from "./types.js";
 
 export interface CheckpointManagerDeps {
@@ -27,6 +28,7 @@ export class CheckpointManager {
   private readonly checkpointDir: string;
   private readonly maxKeep: number;
   private readonly logger: Logger;
+  private readonly metrics = getMetrics();
 
   constructor(deps: CheckpointManagerDeps) {
     this.checkpointDir = deps.checkpointDir;
@@ -37,6 +39,13 @@ export class CheckpointManager {
 
   /** 写 checkpoint。原子:先 tmp 再 rename。 */
   async write(snapshot: CheckpointSnapshot): Promise<void> {
+    const endTimer = safe(
+      () =>
+        this.metrics
+          .histogram("runtime.checkpoint.duration_seconds")
+          .startTimer(),
+      () => 0,
+    );
     await this.ensureDir();
     const realPath = this.pathFor(snapshot.trace_id, 0);
     const tmpPath = `${realPath}.tmp.${Date.now()}`;
@@ -45,6 +54,7 @@ export class CheckpointManager {
       await fs.writeFile(tmpPath, payload, { encoding: "utf-8", mode: 0o644 });
       await fs.rename(tmpPath, realPath);
       await this.rotate(snapshot.trace_id);
+      safe(() => this.metrics.inc("runtime.checkpoint_writes"), undefined);
       this.logger.debug("checkpoint written", {
         trace_id: snapshot.trace_id,
         step: snapshot.current_step,
@@ -59,6 +69,8 @@ export class CheckpointManager {
         /* ignore */
       }
       throw new CheckpointWriteError(snapshot.trace_id, err);
+    } finally {
+      endTimer();
     }
   }
 
