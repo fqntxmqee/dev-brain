@@ -27,14 +27,20 @@ describe("ops/grafana/dev-brain-dashboard.json (v0.7.0)", () => {
     expect(dash.tags).toContain("dev-brain");
   });
 
-  it("has 12 panels covering all key metrics", () => {
-    expect(dash.panels).toHaveLength(12);
+  it("has 17 panels covering v0.7.0 + v0.10.0 metrics", () => {
+    expect(dash.panels).toHaveLength(17);
     const titles = dash.panels.map((p) => p.title);
     expect(titles).toContain("Brain Tasks Throughput");
     expect(titles).toContain("Brain Task Failure Rate (5m)");
     expect(titles).toContain("Brain Task Duration (p50/p95/p99)");
     expect(titles).toContain("Brain Subtask p95 Duration");
     expect(titles).toContain("cc-connect Send p95");
+    // v0.10.0 新增 5 个 panel
+    expect(titles).toContain("Spec Pipeline Throughput (v0.10.0)");
+    expect(titles).toContain("Runtime: Checkpoint / Retry / Resume (v0.10.0)");
+    expect(titles).toContain("Context Budget Triggers (v0.10.0)");
+    expect(titles).toContain("Debate Consensus Score (v0.10.0)");
+    expect(titles).toContain("Instruction Following (v0.10.0)");
     expect(titles).toContain("Adapter sent vs failed (5m)");
     expect(titles).toContain("File Lock Held & Conflicts");
     expect(titles).toContain("cc-connect Socket Reachable");

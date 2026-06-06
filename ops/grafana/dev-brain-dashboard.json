@@ -298,16 +298,156 @@
       ],
       "title": "Brain Pending / Active",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 24 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum(rate(debate_rounds_total[5m]))",
+          "legendFormat": "debate.rounds/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(debate_converge_total[5m]))",
+          "legendFormat": "debate.converge/s",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(openspec_generated_total[5m]))",
+          "legendFormat": "openspec.generated/s",
+          "refId": "C"
+        }
+      ],
+      "title": "Spec Pipeline Throughput (v0.10.0)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 24 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum(rate(runtime_checkpoint_writes[5m]))",
+          "legendFormat": "checkpoint.writes/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(runtime_retry_total[5m]))",
+          "legendFormat": "retry.total/s",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(runtime_resume_total[5m]))",
+          "legendFormat": "resume.total/s",
+          "refId": "C"
+        }
+      ],
+      "title": "Runtime: Checkpoint / Retry / Resume (v0.10.0)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "unit": "ops" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 30 },
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(runtime_context_budget_triggers[15m]))",
+          "legendFormat": "triggers/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Context Budget Triggers (v0.10.0)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "none" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 30 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(debate_consensus_score_bucket[15m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(debate_consensus_score_bucket[15m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Debate Consensus Score (v0.10.0)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 30 },
+      "id": 17,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum(rate(instruction_rules_applied_total[5m]))",
+          "legendFormat": "rules.applied/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(instruction_rules_violated_total[5m]))",
+          "legendFormat": "rules.violated/s",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(instruction_feedback_recorded_total[5m]))",
+          "legendFormat": "feedback.recorded/s",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(instruction_feedback_injected_total[5m]))",
+          "legendFormat": "feedback.injected/s",
+          "refId": "D"
+        }
+      ],
+      "title": "Instruction Following (v0.10.0)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["dev-brain", "v0.7.0"],
+  "tags": ["dev-brain", "v0.7.0", "v0.10.0"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "Dev Brain v0.7.0",
+  "title": "Dev Brain v0.7.0 + v0.10.0",
   "uid": "dev-brain-v070",
   "version": 1,
   "weekStart": ""
