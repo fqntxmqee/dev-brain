@@ -1,4 +1,4 @@
-# Dev Brain 使用手册 (v0.8.0)
+# Dev Brain 使用手册 (v0.8.0 / v0.10.0)
 
 > 飞书指挥的多 Agent 开发大脑 — 通过单一 Brain Bot 编排本地 Claude Code / Codex / Cursor。
 
@@ -313,6 +313,117 @@ lark-cli im +messages-send \
 
 成功会返回 `ok: true` 和 `message_id`。
 
+### 7.5 长程任务调试指南 (v0.10.0+)
+
+长程任务(2-8h)有 4 类状态: **debate → orchestrator → subtask → audit**。每类有独立
+metric / 日志 / 续跑机制,本节告诉你按 trace_id 怎么追。
+
+#### 7.5.1 trace_id 在哪里出现
+
+| 阶段 | trace_id 出现位置 |
+|---|---|
+| 飞书消息 | 卡片 header + 卡片消息体(点"调试"按钮可见) |
+| 辩论 | `.omc/logs/debate-<date>.jsonl` |
+| OpenSpec 落盘 | `openspec/changes/<changeId>/proposal.md` 头部 |
+| checkpoint | `<auditDir>/checkpoints/<trace_id>.json` |
+| 规则审计 | `~/.dev-brain/rules-audit/rules-<date>.jsonl` (字段 `trace_id`) |
+| 反馈 | `~/.dev-brain/feedback/feedback-<date>.jsonl` (字段 `trace_id`) |
+
+#### 7.5.2 "任务跑了一半没了"
+
+按下面顺序排查:
+
+```bash
+# 1) 看 daemon 还在不在
+pgrep -f "dev-brain.*cli" || echo "daemon dead — restart"
+
+# 2) 看这个 trace 的 checkpoint
+cat <auditDir>/checkpoints/<trace_id>.json | jq .
+
+# 3) 是不是 in_progress? daemon 启动会自动 resume
+ls <auditDir>/checkpoints/ | wc -l
+#  > 20 个 in_progress = 系统不健康,看 runbook 3.5
+
+# 4) 抓最近 5m 这条 trace 的所有日志
+TRACE=trace-xxx
+tail -F .omc/logs/*.jsonl | jq "select(.trace_id==\"$TRACE\")"
+```
+
+#### 7.5.3 "checkpoint 写了但 agent 没产出"
+
+通常发生在 agent 静默 OOM 或 stdin 没关闭。验证:
+
+```bash
+# 看该 subtask 是不是 retry 中
+TRACE=trace-xxx
+grep "$TRACE" .omc/logs/*.jsonl | jq 'select(.subtask_id=="st-N")'
+
+# 看是不是 runtime.retry_total 一直在涨
+curl -s http://127.0.0.1:PORT/metrics | grep runtime_retry_total
+```
+
+#### 7.5.4 "任务完成但 OpenSpec 没写盘"
+
+```bash
+# 1) 看 debate.converge_total 涨没涨
+curl -s http://127.0.0.1:PORT/metrics | grep debate_converge_total
+
+# 2) 看 openspec.generated_total
+curl -s http://127.0.0.1:PORT/metrics | grep openspec_generated_total
+
+# 3) 如果 converge 涨但 generated 没涨 → OpenSpecGenerator 抛错
+grep "OpenSpec" .omc/logs/*.jsonl | tail -20
+```
+
+#### 7.5.5 "agent 总是违反同一条规则"
+
+```bash
+# 1) 看哪条规则被违反最多
+cat ~/.dev-brain/rules-audit/rules-$(date -u +%Y-%m-%d).jsonl \
+  | jq -r 'select(.event=="violated") | .rule_rel' \
+  | sort | uniq -c | sort -rn | head -5
+
+# 2) 看这条规则最近一次注入的版本
+ls -la ~/.claude/rules/common/  # 或对应 scope
+
+# 3) 改写规则,等下一次 mtime 变化(通常 1s 内)
+#    InjectRules.invalidate() 强制刷新缓存
+```
+
+#### 7.5.6 "用户反馈没被注入到下次任务"
+
+```bash
+# 1) 看 feedback.recorded_total
+curl -s http://127.0.0.1:PORT/metrics | grep instruction_feedback
+
+# 2) 看 feedback JSONL 是不是有
+ls -la ~/.dev-brain/feedback/
+
+# 3) 看 InjectRules.extraSources 是不是接上了
+#    grep "extraSources" src/brain/*.ts
+```
+
+#### 7.5.7 一次性脚本: 复活僵死任务
+
+```bash
+# 把 trace 标记为失败,下次启动不再 resume
+node -e '
+  const fs = require("fs");
+  const p = "<auditDir>/checkpoints/trace-xxx.json";
+  const j = JSON.parse(fs.readFileSync(p, "utf-8"));
+  j.state = "failed";
+  fs.writeFileSync(p, JSON.stringify(j, null, 2));
+'
+
+# 强制 InjectRules 清缓存(改完规则后)
+node -e '
+  const { InjectRules } = require("./dist/agent/inject-rules");
+  new InjectRules().invalidate();
+'
+```
+
+> 详细 metric 含义见 [docs/observability.md](observability.md),Playbook 见 §3。
+
 ## 8. CLI 子命令速查
 
 | 命令 | 说明 | 退出码 |
@@ -343,6 +454,7 @@ v0.8.0 引入 `DEV_BRAIN_AGENT_BACKEND`,默认 `native`,行为变化:
 ## 10. 相关文档
 
 - [README.md](../README.md) — 项目概览 + Phase 路线图
+- [observability.md](observability.md) — v0.10.0 10 个新指标 + 5 个 Playbook
 - [ops/RUNBOOK.md](../ops/RUNBOOK.md) — Oncall 告警处理
 - [openspec/](../openspec/) — OpenSpec 变更归档
 - [deploy/dev-brain.service](../deploy/dev-brain.service) — systemd unit(Linux)
