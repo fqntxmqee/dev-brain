@@ -87,6 +87,31 @@ export interface DevBrainConfig {
   readonly cursorMode: "plan" | "ask" | "";
   /** v0.8.0: cursor fallback when local CLI / SDK unavailable */
   readonly cursorFallback: "cc-connect" | "error";
+  /** v0.10.0: spec-driven-workflow — DeepSeek 意图识别 */
+  readonly deepseekApiKey: string;
+  readonly deepseekModel: string;
+  readonly deepseekTimeoutMs: number;
+  readonly deepseekMaxRetries: number;
+  readonly intentCacheTtlMs: number;
+  readonly intentCacheMaxEntries: number;
+  readonly intentFallbackEnabled: boolean;
+  /** v0.10.0: debate 辩论 */
+  readonly debateMaxRounds: number;
+  readonly debateRoundTimeoutMs: number;
+  readonly debateConsensusThreshold: number;
+  /** v0.10.0: runtime 长程 */
+  readonly runtimeLongTaskThresholdSec: number;
+  readonly checkpointIntervalSec: number;
+  readonly checkpointMaxKeep: number;
+  readonly contextBudgetMaxTokens: number;
+  readonly summariseRecentRounds: number;
+  readonly retryMaxAttempts: number;
+  readonly retryBaseBackoffMs: number;
+  readonly progressReportIntervalSec: number;
+  readonly rateLimitBackoffSec: number;
+  readonly rateLimitMaxWaitSec: number;
+  /** v0.10.0: 是否启用整套 spec-driven 流程(灰度开关) */
+  readonly specDrivenEnabled: boolean;
 }
 
 function expandHome(path: string): string {
@@ -205,6 +230,145 @@ export function loadConfig(
       env.DEV_BRAIN_CURSOR_FALLBACK?.trim() === "error"
         ? "error"
         : "cc-connect",
+    // v0.10.0: spec-driven-workflow
+    deepseekApiKey: env.DEV_BRAIN_DEEPSEEK_API_KEY?.trim() ?? "",
+    deepseekModel: env.DEV_BRAIN_DEEPSEEK_MODEL?.trim() || "deepseek-chat",
+    deepseekTimeoutMs: safeInt(
+      env.DEV_BRAIN_DEEPSEEK_TIMEOUT_MS?.trim(),
+      15_000,
+      TimeoutMsSchema,
+    ),
+    deepseekMaxRetries: safeInt(
+      env.DEV_BRAIN_DEEPSEEK_MAX_RETRIES?.trim(),
+      3,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 10, "must be in [1, 10]"),
+    ),
+    intentCacheTtlMs: safeInt(
+      env.DEV_BRAIN_INTENT_CACHE_TTL_MS?.trim(),
+      60_000,
+      TimeoutMsSchema,
+    ),
+    intentCacheMaxEntries: safeInt(
+      env.DEV_BRAIN_INTENT_CACHE_MAX_ENTRIES?.trim(),
+      100,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 10_000, "must be in [1, 10000]"),
+    ),
+    intentFallbackEnabled: env.DEV_BRAIN_INTENT_FALLBACK?.trim() !== "0",
+    debateMaxRounds: safeInt(
+      env.DEV_BRAIN_DEBATE_MAX_ROUNDS?.trim(),
+      3,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 5, "must be in [1, 5]"),
+    ),
+    debateRoundTimeoutMs: safeInt(
+      env.DEV_BRAIN_DEBATE_ROUND_TIMEOUT_MS?.trim(),
+      60_000,
+      TimeoutMsSchema,
+    ),
+    debateConsensusThreshold: Number.parseFloat(
+      env.DEV_BRAIN_DEBATE_CONSENSUS_THRESHOLD?.trim() || "0.85",
+    ),
+    runtimeLongTaskThresholdSec: safeInt(
+      env.DEV_BRAIN_RUNTIME_LONG_TASK_THRESHOLD_SEC?.trim(),
+      300,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 0 && n <= 86_400, "must be in [0, 86400]"),
+    ),
+    checkpointIntervalSec: safeInt(
+      env.DEV_BRAIN_CHECKPOINT_INTERVAL_SEC?.trim(),
+      60,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 3600, "must be in [1, 3600]"),
+    ),
+    checkpointMaxKeep: safeInt(
+      env.DEV_BRAIN_CHECKPOINT_MAX_KEEP?.trim(),
+      5,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 50, "must be in [1, 50]"),
+    ),
+    contextBudgetMaxTokens: safeInt(
+      env.DEV_BRAIN_CONTEXT_BUDGET_MAX_TOKENS?.trim(),
+      150_000,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine(
+          (n) => n >= 1000 && n <= 1_000_000,
+          "must be in [1000, 1000000]",
+        ),
+    ),
+    summariseRecentRounds: safeInt(
+      env.DEV_BRAIN_SUMMARISE_RECENT_ROUNDS?.trim(),
+      2,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 10, "must be in [1, 10]"),
+    ),
+    retryMaxAttempts: safeInt(
+      env.DEV_BRAIN_RETRY_MAX_ATTEMPTS?.trim(),
+      5,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 20, "must be in [1, 20]"),
+    ),
+    retryBaseBackoffMs: safeInt(
+      env.DEV_BRAIN_RETRY_BASE_BACKOFF_MS?.trim(),
+      1_000,
+      TimeoutMsSchema,
+    ),
+    progressReportIntervalSec: safeInt(
+      env.DEV_BRAIN_PROGRESS_REPORT_INTERVAL_SEC?.trim(),
+      30,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 600, "must be in [1, 600]"),
+    ),
+    rateLimitBackoffSec: safeInt(
+      env.DEV_BRAIN_RATE_LIMIT_BACKOFF_SEC?.trim(),
+      30,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 1 && n <= 600, "must be in [1, 600]"),
+    ),
+    rateLimitMaxWaitSec: safeInt(
+      env.DEV_BRAIN_RATE_LIMIT_MAX_WAIT_SEC?.trim(),
+      600,
+      z
+        .string()
+        .regex(/^\d+$/)
+        .transform((s) => Number.parseInt(s, 10))
+        .refine((n) => n >= 10 && n <= 3600, "must be in [10, 3600]"),
+    ),
+    specDrivenEnabled: env.DEV_BRAIN_SPEC_DRIVEN?.trim() === "1",
   };
 }
 
